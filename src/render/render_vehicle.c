@@ -52,7 +52,11 @@
 
 /* One car's sprites. The running game keeps exactly one of these in a module static; the
  * gallery builds and discards one per cell, so reviewing a hundred vehicles never holds more
- * than a single car's textures on the GPU. */
+ * than a single car's textures on the GPU.
+ *
+ * Invariant: every instance is zero-initialised before first use. `s_car` and the gallery cells
+ * have static storage, and the gallery explicitly clears each cell before baking. That makes a
+ * zero Texture2D id the reliable empty-handle state used by partial-bake cleanup. */
 typedef struct {
     bool ready;
     float pxPerM; /* texels per metre these were baked at */
