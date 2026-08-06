@@ -182,21 +182,32 @@ static void car_sprites_draw(const CarSprites *s, const CarVisual *visual, Vecto
 static CarSprites s_car;
 static uint32_t s_carTexKey = 0u;
 static float s_carTexPxPerM = 0.0f;
+static CarVisual s_carTexVisual;
+static bool s_carTexVisualValid = false;
 
-/* Rebake if and only if the picture or the scale changed. */
+/* Rebake if and only if the picture or the scale changed. The hash is a fast first check, not
+ * the identity itself: an exact comparison prevents a 32-bit collision from reusing stale
+ * pixels. CarVisual is safe to compare byte-for-byte because the grammar zero-initialises it
+ * and the purity test requires bit-identical output for identical specs. */
 static void ensure_car_textures(const CarVisual *visual, float pxPerM)
 {
     const uint32_t key = car_visual_bake_key(visual);
-    if (s_car.ready && key == s_carTexKey && pxPerM == s_carTexPxPerM) return;
+    if (s_car.ready && s_carTexVisualValid && key == s_carTexKey &&
+        pxPerM == s_carTexPxPerM && memcmp(visual, &s_carTexVisual, sizeof(*visual)) == 0) {
+        return;
+    }
 
     if (!car_sprites_bake(&s_car, visual, pxPerM)) {
         TRACELOG(LOG_WARNING, "RENDER: vehicle sprite bake failed; retrying next frame");
         s_carTexKey = 0u;
         s_carTexPxPerM = 0.0f;
+        s_carTexVisualValid = false;
         return;
     }
     s_carTexKey = key;
     s_carTexPxPerM = pxPerM;
+    s_carTexVisual = *visual;
+    s_carTexVisualValid = true;
 }
 
 /* Destination pixels per texel inside the world camera. Sprites are baked at the world scale
@@ -239,6 +250,7 @@ void render_vehicle_draw(const Game *game, const VehicleDrawState *draw)
 void render_vehicle_resources_unload(void)
 {
     car_sprites_unload(&s_car);
+    s_carTexVisualValid = false;
 }
 
 /* Nothing to re-acquire eagerly. Clearing the key makes the next draw rebake, which is
@@ -247,6 +259,7 @@ void render_vehicle_resources_reset(void)
 {
     s_carTexKey = 0u;
     s_carTexPxPerM = 0.0f;
+    s_carTexVisualValid = false;
 }
 
 /* ------------------------------------------------------------------------- gallery ----
