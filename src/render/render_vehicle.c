@@ -64,9 +64,14 @@ typedef struct {
 
 static void car_sprites_unload(CarSprites *s)
 {
-    if (s == NULL || !s->ready) return;
-    UnloadTexture(s->body);
-    for (int i = 0; i < WHEEL_COUNT; i++) UnloadTexture(s->wheel[i]);
+    if (s == NULL) return;
+
+    /* A bake may fail after uploading only some parts, before `ready` becomes true. Release
+     * each live handle independently so the failure path cannot leak the partial upload. */
+    if (s->body.id != 0) UnloadTexture(s->body);
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        if (s->wheel[i].id != 0) UnloadTexture(s->wheel[i]);
+    }
     memset(s, 0, sizeof(*s));
 }
 
