@@ -49,7 +49,8 @@
 
 #define MAX_POLY_POINTS (2 * CAR_HULL_STATIONS + 8)
 
-/* Where a fill writes. Either channel may be NULL. */
+/* Where a fill writes. Either channel may be NULL. `clipHull` is optional and is used only
+ * for paint and fittings that must stay inside the body silhouette. */
 typedef struct {
     unsigned char *rgba;
     unsigned char *labels;
@@ -58,13 +59,39 @@ typedef struct {
     float pxPerM;
     float originXPx;
     float originYPx;
+    const CarVisual *clipHull;
 } RasterTarget;
 
 /* ------------------------------------------------------------------------- primitives -- */
 
+/* The hull polygon connects its nine stations with straight segments. Test the same geometry
+ * at the pixel centre so a body-clipped fill cannot create silhouette pixels of its own. */
+static bool pixel_inside_clip_hull(const RasterTarget *t, int x, int y)
+{
+    if (t->clipHull == NULL) return true;
+
+    const CarVisual *v = t->clipHull;
+    const int last = CAR_HULL_STATIONS - 1;
+    const float xM = (((float)x + 0.5f) - t->originXPx) / t->pxPerM;
+    const float yM = (t->originYPx - ((float)y + 0.5f)) / t->pxPerM;
+
+    if (xM < v->hull[0].xM || xM > v->hull[last].xM) return false;
+
+    int station = 0;
+    while (station < last - 1 && xM > v->hull[station + 1].xM) station++;
+
+    const float x0 = v->hull[station].xM;
+    const float x1 = v->hull[station + 1].xM;
+    const float u = (x1 > x0) ? clampf((xM - x0) / (x1 - x0), 0.0f, 1.0f) : 0.0f;
+    const float halfWidth = lerpf(v->hull[station].halfWidthM,
+                                  v->hull[station + 1].halfWidthM, u);
+    return fabsf(yM) <= halfWidth;
+}
+
 static void put_px(const RasterTarget *t, int x, int y, Color c, unsigned char label)
 {
     if (x < 0 || y < 0 || x >= t->width || y >= t->height) return;
+    if (!pixel_inside_clip_hull(t, x, y)) return;
     const size_t index = (size_t)y * (size_t)t->width + (size_t)x;
 
     if (t->rgba != NULL) {
@@ -419,9 +446,16 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
     fill_polygon_px(t, poly, build_hull(t, v, onePx, poly), v->outline, CAR_LABEL_OUTLINE);
     fill_polygon_px(t, poly, build_hull(t, v, 0.0f, poly), v->body, CAR_LABEL_BODY);
 
+    /* Everything mounted on or painted onto the body uses the exact hull as a pixel clip.
+     * Appendages, arches, wheels, exhausts, and the heading marker continue to use `t` so they
+     * may intentionally extend beyond the silhouette. */
+    RasterTarget bodyTarget = *t;
+    bodyTarget.clipHull = v;
+    const RasterTarget *body = &bodyTarget;
+
     {
         const float rearLen = 0.42f * (noseX - tailX);
-        fill_oriented_rect(t, tailX + 0.5f * rearLen, 0.0f, rearLen,
+        fill_oriented_rect(body, tailX + 0.5f * rearLen, 0.0f, rearLen,
                            2.0f * v->hull[1].halfWidthM, 0.0f,
                            (Color){ v->bodyShade.r, v->bodyShade.g, v->bodyShade.b, 150 },
                            CAR_LABEL_BODY_SHADE);
@@ -432,15 +466,15 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
      * A dark opening is laid down first. Fixed-roof panels cover it completely, targa
      * panels leave their derived centre gap, and convertibles leave the opening exposed.
      * All geometry was decided by car_visual_derive(). */
-    fill_oriented_rect(t, 0.5f * (v->roofStartXM + v->roofEndXM), 0.0f, v->roofLengthM,
+    fill_oriented_rect(body, 0.5f * (v->roofStartXM + v->roofEndXM), 0.0f, v->roofLengthM,
                        v->roofWidthM, 0.0f, v->glass, CAR_LABEL_GLASS);
     for (int i = 0; i < v->roofPanelCount; i++) {
-        fill_oriented_rect(t, v->roofPanels[i].centreXM, 0.0f, v->roofPanels[i].lengthM,
+        fill_oriented_rect(body, v->roofPanels[i].centreXM, 0.0f, v->roofPanels[i].lengthM,
                            v->roofWidthM, 0.0f, v->cabin, CAR_LABEL_CABIN);
     }
     /* L3 body-coloured roof highlight; every L4 glass feature is painted afterwards. */
     for (int i = 0; i < v->roofPanelCount; i++) {
-        fill_oriented_rect(t, v->roofPanels[i].centreXM, 0.0f,
+        fill_oriented_rect(body, v->roofPanels[i].centreXM, 0.0f,
                            v->roofPanels[i].lengthM * v->roofHighlightLengthScale,
                            v->roofHighlightWidthM, 0.0f, v->body, CAR_LABEL_BODY);
     }
@@ -450,31 +484,31 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
     const float sideY = 0.5f * (v->roofWidthM - v->sideWindowBandWidthM);
     for (int i = 0; i < v->sideWindowCount; i++) {
         for (int side = -1; side <= 1; side += 2) {
-            fill_oriented_rect(t, v->sideWindows[i].centreXM, (float)side * sideY,
+            fill_oriented_rect(body, v->sideWindows[i].centreXM, (float)side * sideY,
                                v->sideWindows[i].lengthM, v->sideWindowBandWidthM, 0.0f,
                                v->glass, CAR_LABEL_GLASS);
         }
     }
     for (int side = -1; side <= 1; side += 2) {
-        fill_oriented_rect(t, v->quarterWindow.centreXM, (float)side * sideY,
+        fill_oriented_rect(body, v->quarterWindow.centreXM, (float)side * sideY,
                            v->quarterWindow.lengthM, v->sideWindowBandWidthM, 0.0f, v->glass,
                            CAR_LABEL_QUARTER_WINDOW);
     }
-    fill_oriented_rect(t, v->windscreenXM - 0.5f * v->windscreenLengthM, 0.0f,
+    fill_oriented_rect(body, v->windscreenXM - 0.5f * v->windscreenLengthM, 0.0f,
                        v->windscreenLengthM, 2.0f * v->glassHalfWidthM, 0.0f, v->glass,
                        CAR_LABEL_GLASS);
-    fill_oriented_rect(t, v->backlightXM + 0.5f * v->backlightLengthM, 0.0f,
+    fill_oriented_rect(body, v->backlightXM + 0.5f * v->backlightLengthM, 0.0f,
                        v->backlightLengthM, 1.88f * v->glassHalfWidthM, 0.0f, v->glass,
                        CAR_LABEL_GLASS);
-    fill_oriented_rect(t, v->sunroof.centreXM, 0.0f, v->sunroof.lengthM, 0.56f * v->roofWidthM,
-                       0.0f, v->glass, CAR_LABEL_SUNROOF);
+    fill_oriented_rect(body, v->sunroof.centreXM, 0.0f, v->sunroof.lengthM,
+                       0.56f * v->roofWidthM, 0.0f, v->glass, CAR_LABEL_SUNROOF);
 
     /* ============================================================== L4b: cage ===== */
     if (v->hasCage && v->cabinLengthM > 0.0f) {
-        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, v->cabinLengthM, 2.0f * onePx, 0.0f,
+        fill_oriented_rect(body, v->cabinCentreXM, 0.0f, v->cabinLengthM, 2.0f * onePx, 0.0f,
                            v->outline, CAR_LABEL_CAGE);
-        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, 2.0f * onePx, 2.0f * v->cabinHalfWidthM,
-                           0.0f, v->outline, CAR_LABEL_CAGE);
+        fill_oriented_rect(body, v->cabinCentreXM, 0.0f, 2.0f * onePx,
+                           2.0f * v->cabinHalfWidthM, 0.0f, v->outline, CAR_LABEL_CAGE);
     }
 
     /* ========================================================= L5: lights ===== */
@@ -484,11 +518,12 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         const float tailHalf = v->hull[0].halfWidthM;
         for (int s = -1; s <= 1; s += 2) {
             /* Headlights: warm white at the nose. */
-            fill_oriented_rect(t, noseX - 0.5f * lampLen, (float)s * noseHalf * 0.55f, lampLen,
-                               lampWid, 0.0f, v->lamp, CAR_LABEL_LAMP);
+            fill_oriented_rect(body, noseX - 0.5f * lampLen, (float)s * noseHalf * 0.55f,
+                               lampLen, lampWid, 0.0f, v->lamp, CAR_LABEL_LAMP);
             /* Tail/brake lights: red at the tail. */
-            fill_oriented_rect(t, tailX + 0.5f * lampLen, (float)s * tailHalf * 0.55f, lampLen,
-                               lampWid, 0.0f, (Color){ 200, 48, 40, 255 }, CAR_LABEL_LAMP);
+            fill_oriented_rect(body, tailX + 0.5f * lampLen, (float)s * tailHalf * 0.55f,
+                               lampLen, lampWid, 0.0f, (Color){ 200, 48, 40, 255 },
+                               CAR_LABEL_LAMP);
         }
     }
 
@@ -612,11 +647,11 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         const float bedWid = v->widthM * 0.78f * v->pickupBedWeight;
         if (bedLen > 0.0f && bedWid > 0.0f) {
             /* Bed floor: darker rectangle covering the rear body. */
-            fill_oriented_rect(t, bedEndX + 0.5f * bedLen, 0.0f, bedLen, bedWid, 0.0f, v->cabin,
-                               CAR_LABEL_BED);
+            fill_oriented_rect(body, bedEndX + 0.5f * bedLen, 0.0f, bedLen, bedWid, 0.0f,
+                               v->cabin, CAR_LABEL_BED);
             /* Bed rails: thin outline strips at the bed edges. */
             for (int s = -1; s <= 1; s += 2) {
-                fill_oriented_rect(t, bedEndX + 0.5f * bedLen, (float)s * bedWid * 0.50f,
+                fill_oriented_rect(body, bedEndX + 0.5f * bedLen, (float)s * bedWid * 0.50f,
                                    bedLen, onePx * 1.5f, 0.0f, v->outline, CAR_LABEL_BED);
             }
         }
@@ -632,7 +667,7 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         const Color bulgeColor = (Color){ (unsigned char)minf((int)v->cabin.r + 25, 255),
                                           (unsigned char)minf((int)v->cabin.g + 25, 255),
                                           (unsigned char)minf((int)v->cabin.b + 25, 255), 255 };
-        fill_oriented_rect(t, hoodCentreX, 0.0f, hoodLen * 0.65f, bulgeW * 2.0f, 0.0f,
+        fill_oriented_rect(body, hoodCentreX, 0.0f, hoodLen * 0.65f, bulgeW * 2.0f, 0.0f,
                            bulgeColor, CAR_LABEL_HOOD_BULGE);
     }
 
@@ -644,7 +679,7 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         const float pinX = noseX - 0.25f;
         const float pinY = v->widthM * 0.16f;
         for (int s = -1; s <= 1; s += 2) {
-            fill_disc(t, pinX, (float)s * pinY, v->hoodPinDiameterM, v->accent,
+            fill_disc(body, pinX, (float)s * pinY, v->hoodPinDiameterM, v->accent,
                       CAR_LABEL_HOOD_PINS);
         }
     }
@@ -661,7 +696,7 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         const float stripeGap = v->widthM * 0.10f * v->stripeWeight;
         /* Two stripes offset from centreline. */
         for (int s = -1; s <= 1; s += 2) {
-            fill_oriented_rect(t, 0.0f, (float)s * stripeGap, stripeLen, stripeW, 0.0f,
+            fill_oriented_rect(body, 0.0f, (float)s * stripeGap, stripeLen, stripeW, 0.0f,
                                v->stripeColor, CAR_LABEL_STRIPE);
         }
     }
