@@ -493,12 +493,16 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     return true;
 }
 
-/* Locked axle, post-integration: one wheel pair, same treatment front and rear. The right
- * wheel follows the left, including the lock flag — one omega per driven axle is the whole
- * point of a locked differential. */
+/* Locked axle, post-integration: one wheel pair, same treatment front and rear. Both wheels
+ * take the mean of their independently integrated speeds — the projection that conserves the
+ * pair's angular momentum for equal inertias — plus the shared lock flag. One omega per
+ * driven axle is the whole point of a locked differential. */
 static void locked_axle_equalize(VehicleState *state, WheelId left, WheelId right)
 {
-    state->wheels[right].angularVelocityRadS = state->wheels[left].angularVelocityRadS;
+    const float meanOmegaRadS = 0.5f * (state->wheels[left].angularVelocityRadS +
+                                        state->wheels[right].angularVelocityRadS);
+    state->wheels[left].angularVelocityRadS = meanOmegaRadS;
+    state->wheels[right].angularVelocityRadS = meanOmegaRadS;
     state->wheels[right].locked = state->wheels[left].locked;
 }
 

@@ -61,7 +61,9 @@ TelemetryRow test_telemetry_row_from_game(const Game *game, int substepCount)
                       game->vehicle.wheels[WHEEL_FRONT_RIGHT].locked;
     row.rearLocked = game->vehicle.wheels[WHEEL_REAR_LEFT].locked ||
                      game->vehicle.wheels[WHEEL_REAR_RIGHT].locked;
-    row.driveTorqueNm = game->derived.driveTorqueNm[WHEEL_REAR_LEFT] +
+    row.driveTorqueNm = game->derived.driveTorqueNm[WHEEL_FRONT_LEFT] +
+                        game->derived.driveTorqueNm[WHEEL_FRONT_RIGHT] +
+                        game->derived.driveTorqueNm[WHEEL_REAR_LEFT] +
                         game->derived.driveTorqueNm[WHEEL_REAR_RIGHT];
     row.frontBrakeTorqueNm = game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
                              game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];

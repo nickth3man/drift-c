@@ -84,10 +84,10 @@ static const RosterEntry kRoster[] = {
             { NULL, 0 },
         },
     },
-    /* 3: fwd_hot — a more powerful FWD car, seeded from Track Predator mass/power but with
-     * front-drive layout and a forward weight bias. Torque steer and lift-off rotation. */
+    /* 3: fwd_hot — a more powerful FWD car in the Touge Hero mass class (PLAN Phase 2),
+     * with front-drive layout and a forward weight bias. Torque steer and lift-off rotation. */
     {
-        4,
+        1,
         DRIVE_LAYOUT_FWD,
         0.0f,
         "fwd_hot",
@@ -161,7 +161,13 @@ bool car_roster_spec(int index, VehicleSpec *out)
         count++;
     }
 
-    dev_params_apply_assignments(out, items, count, NULL, NULL);
+    int unknown = 0;
+    int rejected = 0;
+    const int applied = dev_params_apply_assignments(out, items, count, &unknown, &rejected);
+    /* Every key above is a registered primary, so an unknown key, a rejected (out-of-range)
+     * value, or a short apply count is a typo in the roster table, not a runtime condition.
+     * Fail loudly rather than silently shipping a car that kept its stock preset value. */
+    if (unknown > 0 || rejected > 0 || applied != count) return false;
     return true;
 }
 

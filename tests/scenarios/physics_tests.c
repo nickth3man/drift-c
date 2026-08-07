@@ -2847,7 +2847,7 @@ static const TestScenario kPhysicsScenarios[] = {
     { "peak-friction-slip-sweep",
       "uni-modal mu-slip curve: one interior peak, monotonic rise and fall",
       scenario_peak_friction_slip_sweep },
-    { "drivetrain-layout", "RWD/FWD/AWD torque routing and slip-angle differential ordering",
+    { "drivetrain-layout", "RWD/FWD/AWD torque routing and slip-ratio differential ordering",
       scenario_drivetrain_layout },
     { "roster", "6-car roster: validity, unique ids, profile round-trip", scenario_roster },
 };

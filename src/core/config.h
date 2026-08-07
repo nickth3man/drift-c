@@ -345,7 +345,6 @@
 
 #define CAMERA_BASE_ZOOM 0.55f      /* dimensionless; >1 magnifies (zooms in) */
 #define CAMERA_MIN_ZOOM 0.30f       /* dimensionless; must stay > 0 */
-#define CAMERA_ZOOM_RATE 4.0f       /* 1/second smoothing rate */
 #define CAMERA_LOOKAHEAD 0.25f      /* seconds of velocity lookahead (reserved) */
 #define SLIDE_USAGE_THRESHOLD 0.98f /* dimensionless friction usage = physically sliding */
 

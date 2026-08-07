@@ -245,6 +245,7 @@ GAME_API void game_init(Game *game)
     game->debugOverlay = false;
     game->reloadCount = 0;
     game->reloadFlashTimerS = 0.0f;
+    game->crashLockoutTimerS = 0.0f;
     particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
     game->camera = (Camera2D){ .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },

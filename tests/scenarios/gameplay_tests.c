@@ -1,6 +1,6 @@
 /*
- * gameplay_tests.c — track geometry and surfaces, barrier collision, scoring, high-score
- * persistence, checkpoints and laps, the particle pool, and the state machine.
+ * gameplay_tests.c — track geometry and surfaces, barrier collision, checkpoints and laps,
+ * the particle pool, and the state machine.
  */
 #include <stdarg.h>
 #include <stdbool.h>
