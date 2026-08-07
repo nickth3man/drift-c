@@ -89,9 +89,13 @@ __pycache__/
 # Ad-hoc verification / scratch logs (output of `mk verify` redirected to a file)
 mk_verify*.log
 
-# Tooling
+# Tooling. These are per-developer editor and agent state, not project configuration.
+# PowerShellEditorServices.json lived in .git/info/exclude, which is local to one clone and
+# does not travel — the next person to clone saw it as untracked.
 .clangd
 opencode.json
+PowerShellEditorServices.json
+.cache/
 
 # Reference sprite packs used only for human visual comparison during the
 # vehicle-appearance work. Not game assets; issue #7 forbids redistributing them.
@@ -106,4 +110,3 @@ opencode.json
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps
-.slim/deepwork/
