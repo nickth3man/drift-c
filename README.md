@@ -302,7 +302,6 @@ src/physics/physics.h/.c                pure Phase 3 integration and fixed-updat
 src/world/collision.h/.c              swept body collision against track geometry
 src/physics/surface.h/.c                surface types by SurfaceId, resolved at point of use
 src/world/track.h/.c                  track layout and surface regions
-src/game/scoring.h/.c                drift scoring, combo, and run results
 src/game/particle.h/.c               skidmarks and tire smoke
 src/game/audio.h/.c                  engine, screech, and impact playback
 src/render/car_visual.h/.c             the appearance grammar: VehicleSpec -> CarVisual, raylib-free

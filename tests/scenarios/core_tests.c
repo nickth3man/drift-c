@@ -40,7 +40,6 @@
 #include "dev/failure_bundle.h"
 #include "physics/surface.h"
 #include "game/game.h"
-#include "game/scoring.h"
 #include "game/input.h"
 #include "core/math_utils.h"
 #include "game/particle.h"
@@ -360,8 +359,7 @@ static void scenario_units(void)
     {
         const float offsets[] = { 0.0f, 320.0f, 180.0f };
         const float targets[] = { 0.0f, 1.0f, -1.0f, 37.317f, -204.9993f, 1e4f, -1e4f };
-        const float zooms[] = { CAMERA_MIN_ZOOM, CAMERA_BASE_ZOOM - CAMERA_ZOOM_RANGE,
-                                CAMERA_BASE_ZOOM, 1.0f, 2.0f };
+        const float zooms[] = { CAMERA_MIN_ZOOM, 0.45f, CAMERA_BASE_ZOOM, 1.0f, 2.0f };
         int unsnapped = 0;
         for (size_t o = 0; o < sizeof(offsets) / sizeof(offsets[0]); o++) {
             for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {

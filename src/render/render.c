@@ -162,19 +162,12 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     const VehicleDrawState draw = render_interpolate_vehicle(&game->renderState, alpha);
     game->camera.target = units_world_to_render_px(draw.positionM, game->renderPixelsPerMeter);
 
-    /* Camera drift zoom: zoom out during a drift proportional to body sideslip.
-     * Smoothed against render delta time and independent of physics determinism.
-     * A pinned zoom wins outright: a diagnostic recording wants a stable framing, and a
-     * zoom that breathes with sideslip makes frame-to-frame comparison harder to read. */
+    /* Camera zoom: pinned at the base zoom unless a diagnostic override is active.
+     * A pinned zoom gives a stable framing for frame-to-frame comparison. */
     if (game->dev.cameraZoomOverride > 0.0f) {
         game->camera.zoom = game->dev.cameraZoomOverride;
     } else {
-        const float driftIntensity =
-            clampf(fabsf(game->derived.bodySideslipRad) / DRIFT_ZOOM_REF_RAD, 0.0f, 1.0f);
-        float targetZoom = CAMERA_BASE_ZOOM - driftIntensity * CAMERA_ZOOM_RANGE;
-        targetZoom = fmaxf(targetZoom, CAMERA_MIN_ZOOM);
-        game->camera.zoom =
-            smooth_to(game->camera.zoom, targetZoom, CAMERA_ZOOM_RATE, renderDt);
+        game->camera.zoom = CAMERA_BASE_ZOOM;
     }
 
     ensure_world_target();

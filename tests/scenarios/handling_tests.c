@@ -30,7 +30,6 @@
 #include "dev/failure_bundle.h"
 #include "physics/surface.h"
 #include "game/game.h"
-#include "game/scoring.h"
 #include "game/input.h"
 #include "core/math_utils.h"
 #include "game/particle.h"
@@ -1050,12 +1049,11 @@ static void scenario_catchable_drift(void)
           (double)vxAtRecoveryMps, (double)speedAtRecoveryMps);
 
     /*
-     * The drift classifications are outputs, never inputs.
+     * The physicallySliding classification is an output, never an input.
      *
-     * Phase 6 will hang scoring off physicallySliding and scoringDrift. Nothing in the force
-     * path may read either one, so forcing them to the wrong values before every step must
-     * change nothing at all. Running the same slide twice, one copy sabotaged, is the test:
-     * if any force consulted them, the two checksums would diverge.
+     * Nothing in the force path may read it, so forcing it to the wrong value before every
+     * step must change nothing at all. Running the same slide twice, one copy sabotaged,
+     * is the test: if any force consulted it, the two checksums would diverge.
      */
     {
         Game *a = alloc_game();
@@ -1067,15 +1065,13 @@ static void scenario_catchable_drift(void)
         a->dev.scenarioRunning = b->dev.scenarioRunning = true;
         a->dev.scenarioStartTick = b->dev.scenarioStartTick = 0;
         for (int i = 0; i < 900; i++) {
-            b->derived.scoringDrift = true;
             b->derived.physicallySliding = !b->derived.physicallySliding;
             b->debugOverlay = ((i & 1) == 0);
             game_fixed_update(a, FIXED_DT_S);
             game_fixed_update(b, FIXED_DT_S);
         }
         check(a->stateChecksum == b->stateChecksum,
-              "drift and presentation state provably change no physical force (%08x)",
-              a->stateChecksum);
+              "presentation state provably changes no physical force (%08x)", a->stateChecksum);
         check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
               "and the two vehicle states are bit-identical");
         free(b);

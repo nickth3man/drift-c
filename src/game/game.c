@@ -20,7 +20,6 @@
 #include "physics/physics.h"
 #include "game/profile.h"
 #include "render/render.h"
-#include "game/scoring.h"
 #include "world/track.h"
 
 #if !defined(DRIFTY_HEADLESS)
@@ -169,78 +168,6 @@ GAME_API bool game_spawn_on_track(Game *game)
     return true;
 }
 
-/* -------------------------------------------------------------------------------------
- * High-score persistence (Phase 6). Uses standard C file I/O so it works in both the
- * headless test executable and the full game. The directory is created if it does not
- * exist; the load path validates and clamps every value it reads.
- * ------------------------------------------------------------------------------------- */
-
-static const char *persistence_score_path(void)
-{
-    static char path[512];
-    const char *appData = getenv("APPDATA");
-    if (appData != NULL && appData[0] != '\0') {
-        snprintf(path, sizeof(path), "%s/drifty/bestscore.txt", appData);
-    } else {
-        snprintf(path, sizeof(path), "bestscore.txt");
-    }
-    return path;
-}
-
-static void persistence_load_score(Game *game)
-{
-    if (game == NULL) return;
-    const char *path = persistence_score_path();
-    FILE *file = fopen(path, "r");
-    if (file == NULL) return;
-
-    long parsed = 0;
-    int matched = fscanf(file, "%ld", &parsed);
-    fclose(file);
-
-    /* Validate: must have read exactly one integer, in range. */
-    if (matched == 1 && parsed >= 0 && parsed <= (long)MAX_VALID_SCORE) {
-        game->bestScore = (float)parsed;
-#if !defined(DRIFTY_HEADLESS)
-        TRACELOG(LOG_INFO, "GAME: loaded high score %.0f from %s", game->bestScore, path);
-#endif
-    }
-}
-
-static void persistence_save_score(const Game *game)
-{
-    if (game == NULL) return;
-
-    /* Only save when the new score beats the best. */
-    if (game->driftScore <= game->bestScore) return;
-
-    const char *path = persistence_score_path();
-
-    /* Create the parent directory if we can. */
-    const char *appData = getenv("APPDATA");
-    if (appData != NULL && appData[0] != '\0') {
-        char dir[512];
-        snprintf(dir, sizeof(dir), "%s/drifty", appData);
-        DRIFTY_MKDIR(dir);
-    }
-
-    FILE *file = fopen(path, "w");
-    if (file == NULL) {
-#if !defined(DRIFTY_HEADLESS)
-        TRACELOG(LOG_WARNING, "GAME: could not open %s for writing", path);
-#endif
-        return;
-    }
-
-    fprintf(file, "%d", (int)game->driftScore);
-    fclose(file);
-    /* bestScore is const in this function — the caller updates it. */
-
-#if !defined(DRIFTY_HEADLESS)
-    TRACELOG(LOG_INFO, "GAME: saved new high score %.0f to %s", game->driftScore, path);
-#endif
-}
-
 static void apply_oneshots(Game *game, const Input *input)
 {
     if (input->pausePressed) {
@@ -248,19 +175,11 @@ static void apply_oneshots(Game *game, const Input *input)
             case STATE_MENU:
                 game_reset_sim(game);
                 game->state = STATE_PLAYING;
-                game->driftScore = 0.0f;
-                game->driftTimeS = 0.0f;
-                game->comboMultiplier = 1.0f;
-                game->comboTimerS = 0.0f;
                 break;
             case STATE_PLAYING: game->state = STATE_PAUSED; break;
             case STATE_PAUSED: game->state = STATE_PLAYING; break;
             case STATE_RESULTS:
                 game_reset_sim(game);
-                game->driftScore = 0.0f;
-                game->driftTimeS = 0.0f;
-                game->comboMultiplier = 1.0f;
-                game->comboTimerS = 0.0f;
                 game->state = STATE_PLAYING;
                 break;
             default: break;
@@ -269,20 +188,9 @@ static void apply_oneshots(Game *game, const Input *input)
     }
     if (input->resetPressed) {
         switch (game->state) {
-            case STATE_PLAYING:
-                game_reset_sim(game);
-                game->driftScore = 0.0f;
-                game->driftTimeS = 0.0f;
-                game->comboMultiplier = 1.0f;
-                game->comboTimerS = 0.0f;
-                /* stay STATE_PLAYING */
-                break;
+            case STATE_PLAYING: game_reset_sim(game); break;
             case STATE_PAUSED:
                 game_reset_sim(game);
-                game->driftScore = 0.0f;
-                game->driftTimeS = 0.0f;
-                game->comboMultiplier = 1.0f;
-                game->comboTimerS = 0.0f;
                 game->state = STATE_PLAYING;
                 break;
             case STATE_RESULTS: game->state = STATE_MENU; break;
@@ -337,13 +245,6 @@ GAME_API void game_init(Game *game)
     game->debugOverlay = false;
     game->reloadCount = 0;
     game->reloadFlashTimerS = 0.0f;
-    game->driftScore = 0.0f;
-    game->bestScore = 0.0f;
-    game->driftTimeS = 0.0f;
-    game->comboMultiplier = 1.0f;
-    game->comboTimerS = 0.0f;
-    game->crashLockoutTimerS = 0.0f;
-    persistence_load_score(game);
     particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
     game->camera = (Camera2D){ .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
@@ -368,9 +269,7 @@ GAME_API void game_init(Game *game)
     game->stateChecksum = game_state_checksum(game);
     game->initialized = true;
 #if !defined(DRIFTY_HEADLESS)
-    TRACELOG(
-        LOG_INFO,
-        "GAME: initialised (Phase 6 presentation backbone — particles, camera, state machine)");
+    TRACELOG(LOG_INFO, "GAME: initialised (particles, camera, state machine)");
 #endif
 }
 
@@ -501,32 +400,21 @@ GAME_API void game_fixed_update(Game *game, float dt)
             }
         }
 
-        /* Audio: per-tick engine pitch and tyre screech (after physics, before scoring). */
+        /* Audio: per-tick engine pitch and tyre screech (after physics). */
         audio_update(game->vehicle.engineRpm, game->spec.engineIdleRpm,
                      game->spec.engineRedlineRpm, game->derived.physicallySliding,
                      game->derived.speedMps, dt);
 
-        /* Phase 6 drift scoring: classify, then accumulate. These mutate only the
-         * presentation fields (driftScore, driftTimeS, comboMultiplier, etc.) which are
-         * explicitly excluded from the state checksum. No physical force depends on them. */
-        scoring_classify(&game->vehicle, &game->derived, game->crashLockoutTimerS);
-        scoring_update(game, dt);
-
-        /* Phase 6 results trigger: when the target lap count is reached, transition to
-         * STATE_RESULTS and persist the high score. The car is no longer simulated after
-         * this tick. */
+        /* Results trigger: when the target lap count is reached, transition to
+         * STATE_RESULTS. The car is no longer simulated after this tick. */
         if (game->track.lap >= RESULTS_TARGET_LAPS) {
-            if (game->driftScore > game->bestScore) {
-                game->bestScore = game->driftScore;
-                persistence_save_score(game);
-            }
             game->state = STATE_RESULTS;
         }
 
-        /* Phase 6 particle spawn: smoke trails from the rear wheels while in a scoring
-         * drift. Two spawns per rear wheel per tick at 120 Hz ≈ 480 / s while drifting,
+        /* Particle spawn: tire smoke from the rear wheels while physically sliding.
+         * Two spawns per rear wheel per tick at 120 Hz ≈ 480 / s while sliding,
          * which the 512-slot pool sustains over the 0.8 s particle life. */
-        if (game->derived.scoringDrift) {
+        if (game->derived.physicallySliding && game->derived.speedMps > 5.0f) {
             const float heading = game->vehicle.headingRad;
             const float speedMps = fminf(game->derived.speedMps, 50.0f);
 
@@ -575,10 +463,6 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game != NULL) {
-        if (game->driftScore > game->bestScore) {
-            game->bestScore = game->driftScore;
-            persistence_save_score(game);
-        }
         track_free(&game->track);
     }
     (void)game;
@@ -592,10 +476,6 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game == NULL) return;
-    if (game->driftScore > game->bestScore) {
-        game->bestScore = game->driftScore;
-        persistence_save_score(game);
-    }
     track_free(&game->track);
     audio_shutdown();
     render_shutdown();

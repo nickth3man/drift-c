@@ -101,12 +101,7 @@ struct Game {
     float renderPixelsPerMeter;
 
     /* Presentation and diagnostics. */
-    float driftScore;
-    float bestScore;
-    float driftTimeS;
-    float comboMultiplier;
-    float comboTimerS;
-    float crashLockoutTimerS; /* seconds remaining in the post-impact scoring lockout */
+    float crashLockoutTimerS; /* seconds remaining in the post-impact lockout */
     bool debugOverlay;
     int reloadCount;
     float reloadFlashTimerS;

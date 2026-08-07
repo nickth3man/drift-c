@@ -1052,10 +1052,6 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
             fmaxf(derived->maxFrictionUsage, state->wheels[i].frictionUsage);
     }
     derived->physicallySliding = derived->maxFrictionUsage >= 0.98f;
-    /* scoringDrift is owned by scoring_classify() in scoring.c - it is
-     * overwritten in game_fixed_update() after physics returns. Keeping it false
-     * here as the safe default for any path that skips classification. */
-    derived->scoringDrift = false;
 
     renderState->currPositionM = state->positionM;
     renderState->currHeadingRad = state->headingRad;

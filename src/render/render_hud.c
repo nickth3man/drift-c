@@ -63,7 +63,7 @@ static void draw_hud_panel(Rectangle rec)
     DrawRectangleRoundedLines(rec, 0.16f, 6, COL_PANEL_EDGE);
 }
 
-/* Slow pulse between two alpha levels, for "press a key" prompts and the DRIFT! callout.
+/* Slow pulse between two alpha levels, for "press a key" prompts.
  * Render-only time source; nothing here feeds the simulation. */
 static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsigned char hi)
 {
@@ -79,6 +79,7 @@ static const char *gear_label(int selectedGear);
  */
 static void draw_overlay_menu(const Game *game)
 {
+    (void)game;
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
 
     draw_text_centered_shadow("DRIFTY", 226, 64, COL_ACCENT);
@@ -90,11 +91,6 @@ static void draw_overlay_menu(const Game *game)
     draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    "
                        "Q/E shift    P pause    R reset",
                        466, 16, COL_TEXT_DIM);
-
-    if (game->bestScore > 0.0f) {
-        draw_text_centered(TextFormat("BEST  %.0f", (double)game->bestScore), 528, 18,
-                           COL_COOL);
-    }
 }
 
 static void draw_overlay_paused(const Game *game)
@@ -110,33 +106,21 @@ static void draw_overlay_results(const Game *game)
 {
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
 
-    /* bestScore is raised to driftScore on entering STATE_RESULTS, so equality here
-     * means this run set (or matched) the best; guard against the 0/0 first-boot case. */
-    const bool newBest = game->driftScore >= game->bestScore && game->driftScore > 0.0f;
-
     draw_text_centered_shadow("RUN COMPLETE", 196, 40, COL_TEXT);
 
-    /* The payoff: the final drift score, biggest thing on the screen. */
-    draw_text_centered_shadow(TextFormat("%.0f", (double)game->driftScore), 286, 56,
-                              COL_ACCENT);
-    draw_text_centered("DRIFT SCORE", 352, 16, COL_TEXT_DIM);
-
-    draw_text_centered(TextFormat("BEST  %.0f", (double)game->bestScore), 398, 20, COL_COOL);
-    if (newBest) {
-        draw_text_centered("NEW BEST!", 436, 24,
-                           (Color){ COL_ACCENT_WARM.r, COL_ACCENT_WARM.g, COL_ACCENT_WARM.b,
-                                    pulse_alpha(0.9f, 120, 255) });
-    }
+    /* Lap time is the primary result now. */
+    const int mins = (int)(game->track.lastLapTimeS / 60.0f);
+    const float secs = game->track.lastLapTimeS - (float)mins * 60.0f;
+    draw_text_centered_shadow(TextFormat("%d:%05.2f", mins, (double)secs), 286, 56, COL_ACCENT);
+    draw_text_centered("LAP TIME", 352, 16, COL_TEXT_DIM);
 
     draw_text_centered("P drive again    R menu", 504, 18, COL_TEXT_DIM);
 }
 
 /* ---- arcade HUD clusters -------------------------------------------------------------
- * Three clusters with clear hierarchy, each on a translucent panel so it reads against
+ * Two clusters with clear hierarchy, each on a translucent panel so it reads against
  * any track background:
  *   speed  - bottom-left: km/h large, gear, rpm bar. The most-glanced readout.
- *   score  - top-right:   drift score prominent, combo in accent gold (larger while a
- *                         drift is scoring), DRIFT! callout, best score small.
  *   lap    - top-center:  lap count, running timer, checkpoint progress.
  */
 void render_hud_draw_arcade(const Game *game)
@@ -168,33 +152,6 @@ void render_hud_draw_arcade(const Game *game)
                          (rpmFrac > 0.85f) ? COL_ACCENT : COL_COOL);
         DrawText(TextFormat("%.0f RPM", (double)game->vehicle.engineRpm), (int)panel.x + 16,
                  (int)panel.y + 114, 12, COL_TEXT_DIM);
-    }
-
-    /* ---- score cluster (top-right) ---- */
-    {
-        const Rectangle panel = { SCREEN_W - 266.0f, 16.0f, 248.0f, 122.0f };
-        const int right = (int)(panel.x + panel.width) - 16;
-        draw_hud_panel(panel);
-
-        DrawText("SCORE", (int)panel.x + 16, (int)panel.y + 10, 14, COL_TEXT_DIM);
-        DrawText(TextFormat("%.0f", (double)game->driftScore), (int)panel.x + 16,
-                 (int)panel.y + 26, 34, COL_TEXT);
-        DrawText(TextFormat("BEST %.0f", (double)game->bestScore), (int)panel.x + 16,
-                 (int)panel.y + 68, 14, COL_COOL);
-
-        /* Combo: prominent in gold while a drift is scoring, quiet otherwise. */
-        const bool drifting = game->derived.scoringDrift;
-        const char *comboText = TextFormat("x%.1f", (double)game->comboMultiplier);
-        const int comboSize = drifting ? 30 : 18;
-        DrawText(comboText, right - MeasureText(comboText, comboSize),
-                 (int)panel.y + (drifting ? 22 : 30), comboSize,
-                 drifting ? COL_ACCENT : COL_TEXT_DIM);
-        if (drifting) {
-            const char *callout = "DRIFT!";
-            DrawText(callout, right - MeasureText(callout, 16), (int)panel.y + 58, 16,
-                     (Color){ COL_ACCENT_WARM.r, COL_ACCENT_WARM.g, COL_ACCENT_WARM.b,
-                              pulse_alpha(1.2f, 110, 255) });
-        }
     }
 
     /* ---- lap cluster (top-center) ---- */
@@ -428,13 +385,6 @@ void render_hud_draw_diagnostics(const Game *game, float alpha)
                                      (float)(int)(game->track.lapTimerS / 60.0f) * 60.0f),
                             game->track.nextCheckpoint, game->track.checkpointCount),
                  label);
-        hud_line(14, &y,
-                 TextFormat("Score: %.0f  Best: %.0f  Combo: x%.1f  Drift: %.2fs%s",
-                            (double)game->driftScore, (double)game->bestScore,
-                            (double)game->comboMultiplier, (double)game->driftTimeS,
-                            game->derived.scoringDrift ? "  DRIFT!" : ""),
-                 dim);
-
         {
             hud_line(
                 14, &y,

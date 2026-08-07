@@ -236,7 +236,6 @@ typedef struct {
     float maxFrictionUsage;
     float lowSpeedBlend;
     bool physicallySliding;
-    bool scoringDrift;
 
     /* Phase 1/2 diagnostics used by tests, telemetry, and the debug overlay. */
     Vector2 wheelContactVelocityBodyMps[WHEEL_COUNT];

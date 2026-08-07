@@ -29,7 +29,6 @@
 #include "dev/failure_bundle.h"
 #include "physics/surface.h"
 #include "game/game.h"
-#include "game/scoring.h"
 #include "game/input.h"
 #include "core/math_utils.h"
 #include "game/particle.h"
@@ -1031,12 +1030,6 @@ static void scenario_lap_target_results(void)
     game->track.lap = RESULTS_TARGET_LAPS - 1;
     game->track.lapTimerS = 1.0f;
 
-    /* bestScore is deliberately huge so persistence_save_score's write-guard
-     * (driftScore <= bestScore) never fires: this scenario proves the STATE_RESULTS
-     * transition, not real APPDATA persistence (see highscore-persistence). */
-    game->driftScore = 500.0f;
-    game->bestScore = 1.0e8f;
-
     check(game->state == STATE_PLAYING, "precondition: game starts in STATE_PLAYING");
 
     /* Gate 0 is the finish line at (0,0), forward direction (+1,0): cross it moving +X at
@@ -1060,512 +1053,7 @@ static void scenario_lap_target_results(void)
           "reaching RESULTS_TARGET_LAPS transitions STATE_PLAYING -> STATE_RESULTS live, "
           "not by a hand-set game->state (got %d)",
           (int)game->state);
-    check(game->bestScore > 9.9e7f,
-          "bestScore is untouched: the driftScore <= bestScore save-guard held (%.1f)",
-          (double)game->bestScore);
-
     free(game);
-}
-
-/* ------------------------------------------------------------------------------------- */
-/* Phase 6: Scoring scenarios                                                            */
-/* ------------------------------------------------------------------------------------- */
-
-/*
- * scoring-accumulation: drive into a sustained drift and verify score accumulation,
- * combo multiplier, and grace-period reset.
- */
-static void scenario_scoring_accumulation(void)
-{
-    Game *game = alloc_game();
-    game_init(game);
-    game->spec.differentialMode = (float)DIFF_LOCKED;
-    game->spec.lateralLoadTransferEnabled = false;
-    game->spec.engineRedlineRpm = 10000.0f;
-
-    /* Build enough speed for a drift. Cruise at ~18 m/s on asphalt. */
-    set_vehicle_rolling_speed(game, 18.0f);
-    game->autoTrans.enabled = false;
-    game->vehicle.selectedGear = 1;
-
-    /* Run 20 ticks with gentle steer — score should be near zero. */
-    int i;
-    game->input.throttle = 0.60f;
-    game->input.steer = 0.0f;
-    game->input.handbrake = 0.0f;
-    for (i = 0; i < 20; i++) game_fixed_update(game, FIXED_DT_S);
-    float scoreBefore = game->driftScore;
-    check(scoreBefore < 0.01f, "no significant score before drift initiation (%.1f)",
-          (double)scoreBefore);
-    /* Handbrake entry: zero throttle so drive torque doesn't fight the lock. */
-    game->input.throttle = 0.0f;
-    game->input.steer = 1.0f;
-    game->input.handbrake = 1.0f;
-    for (i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);
-
-    /* Release handbrake; apply throttle and steer to maintain the slide. */
-    game->input.handbrake = 0.0f;
-    game->input.throttle = 0.50f;
-    game->input.steer = 0.70f;
-
-    bool everScoring = false;
-    float lastScore = scoreBefore;
-    bool scoreMonotonic = true;
-    float peakCombo = 1.0f;
-    float peakSideslipRad = 0.0f;
-    float peakRearSlipRad = 0.0f;
-    float peakSpeedMps = 0.0f;
-    int scoringTicks = 0;
-
-    for (i = 0; i < 400; i++) {
-        game_fixed_update(game, FIXED_DT_S);
-        if (game->derived.scoringDrift) {
-            everScoring = true;
-            scoringTicks++;
-            if (game->driftScore < lastScore - 0.001f) scoreMonotonic = false;
-            lastScore = game->driftScore;
-            if (game->comboMultiplier > peakCombo) peakCombo = game->comboMultiplier;
-            const float ss = fabsf(game->derived.bodySideslipRad);
-            const float rs = fabsf(game->derived.rearSlipAngleRad);
-            if (ss > peakSideslipRad) peakSideslipRad = ss;
-            if (rs > peakRearSlipRad) peakRearSlipRad = rs;
-            if (game->derived.speedMps > peakSpeedMps) peakSpeedMps = game->derived.speedMps;
-        }
-    }
-
-    check(everScoring, "the car achieves scoringDrift at least once");
-    check(scoreMonotonic, "driftScore increases monotonically while scoringDrift is true");
-    /* Phase 2/4 sensitive steering produces shallower slides than the original handbrake
-     * recipe. Diagnostic peaks keep the test self-explaining when a tuning pass resumes. */
-    check(peakSideslipRad >= MIN_DRIFT_ANGLE_RAD,
-          "drift reaches the minimum sideslip (got %.3f rad, need %.3f)",
-          (double)peakSideslipRad, (double)MIN_DRIFT_ANGLE_RAD);
-    check(peakRearSlipRad >= MIN_REAR_SLIP_RAD,
-          "drift reaches the minimum rear slip (got %.3f rad, need %.3f)",
-          (double)peakRearSlipRad, (double)MIN_REAR_SLIP_RAD);
-    check(peakSpeedMps >= MIN_DRIFT_SPEED_MPS,
-          "drift holds the minimum speed (got %.1f m/s, need %.1f)", (double)peakSpeedMps,
-          (double)MIN_DRIFT_SPEED_MPS);
-    check(peakCombo > 1.0f,
-          "comboMultiplier rises above 1.0 during a sustained drift (peak %.3f)",
-          (double)peakCombo);
-    check(game->driftScore > 0.0f,
-          "driftScore accumulates above zero (got %.3f over %d scoring ticks, peak sideslip "
-          "%.3f rad)",
-          (double)game->driftScore, scoringTicks, (double)peakSideslipRad);
-    check(peakCombo <= 4.0f + 1e-4f, "comboMultiplier is capped at 4.0 (peak %.3f)",
-          (double)peakCombo);
-    check(game->comboMultiplier >= 1.0f, "comboMultiplier is never below 1.0 (final %.3f)",
-          (double)game->comboMultiplier);
-
-    /* Now stop drifting: straighten the wheel, drop throttle, apply brake. */
-    game->input.steer = 0.0f;
-    game->input.throttle = 0.0f;
-    game->input.brake = 1.0f;
-
-    /* Run until well past COMBO_GRACE_S (1.5 s → 180 ticks at 120 Hz). */
-    bool comboReset = false;
-    float timeReset = 0.0f;
-    for (i = 0; i < 400; i++) {
-        game_fixed_update(game, FIXED_DT_S);
-        if (game->comboMultiplier < 1.0f + 1e-6f && game->driftTimeS < 1e-6f) {
-            comboReset = true;
-            timeReset = (float)i * FIXED_DT_S;
-            break;
-        }
-    }
-    check(comboReset, "comboMultiplier and driftTimeS reset after COMBO_GRACE_S (%.3f s)",
-          (double)timeReset);
-
-    /* driftTimeS should be zero now (or very close). */
-    check(game->driftTimeS < 0.01f, "driftTimeS resets to zero after the grace period (%.4f)",
-          (double)game->driftTimeS);
-
-    free(game);
-}
-
-/*
- * scoring-rejection: assert scoringDrift stays false under conditions that must NOT score.
- *   - Creeping forward at 2 m/s (below MIN_DRIFT_SPEED_MPS)
- *   - Reversing with slide
- *   - Spinning in place (high yaw, ~0 speed)
- *   - Post-crash lockout
- *   - Past spin cutoff
- */
-static void scenario_scoring_rejection(void)
-{
-    Game *game = alloc_game();
-
-    /* --- Rejection 1: Creeping forward below MIN_DRIFT_SPEED_MPS --- */
-    game_init(game);
-    set_vehicle_rolling_speed(game, 2.0f);
-    game->input.steer = 0.50f;
-    game->input.throttle = 0.20f;
-    int i;
-    for (i = 0; i < 30; i++) game_fixed_update(game, FIXED_DT_S);
-    check(!game->derived.scoringDrift, "creeping at %.1f m/s (below %.1f) does NOT score",
-          (double)game->derived.speedMps, (double)MIN_DRIFT_SPEED_MPS);
-    check(game->driftScore < 0.01f, "no score accrued while creeping");
-
-    /* --- Rejection 2: Reversing with slide --- */
-    game_init(game);
-    /* Reverse: set longitudinal velocity negative. */
-    game->vehicle.velocityLongitudinalMps = -8.0f;
-    game->vehicle.velocityLateralMps = 3.0f;
-    game->vehicle.yawRateRadS = 1.0f;
-    game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS = -8.0f / game->spec.wheelRadiusM;
-    game->vehicle.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS =
-        -8.0f / game->spec.wheelRadiusM;
-    game->vehicle.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS =
-        -8.0f / game->spec.wheelRadiusM;
-    game->vehicle.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS =
-        -8.0f / game->spec.wheelRadiusM;
-    game->vehicle.selectedGear = -1;
-
-    /* Force derived values to match so classification sees the slide. */
-    game->derived.speedMps = 8.0f;
-    game->derived.bodySideslipRad = atan2f(3.0f, 8.0f);
-    game->derived.rearSlipAngleRad = 0.15f;
-
-    /* Call classify directly on our carefully set reverse state. */
-    scoring_classify(&game->vehicle, &game->derived, 0.0f);
-    check(!game->derived.scoringDrift, "reversing (vx %.1f < 0) does NOT score",
-          (double)game->vehicle.velocityLongitudinalMps);
-
-    /* --- Rejection 3: Spinning in place (high yaw, ~0 speed) --- */
-    game_init(game);
-    game->vehicle.velocityLongitudinalMps = 0.1f;
-    game->vehicle.velocityLateralMps = 0.1f;
-    game->vehicle.yawRateRadS = 3.0f;
-    /* Force derived state to match before classification. */
-    game->derived.speedMps = 0.1414f;
-    game->derived.bodySideslipRad = 0.8f;
-    game->derived.rearSlipAngleRad = 0.5f;
-    /* Call classify directly — avoids physics overwriting our setup. */
-    scoring_classify(&game->vehicle, &game->derived, 0.0f);
-    check(!game->derived.scoringDrift, "spinning at near-zero speed (%.2f m/s) does NOT score",
-          (double)game->derived.speedMps);
-
-    /* --- Rejection 4: Post-crash lockout --- */
-    game_init(game);
-    set_vehicle_rolling_speed(game, 18.0f);
-    game->input.steer = 0.40f;
-    game->input.throttle = 0.80f;
-    /* Force the car into a slide then activate crash lockout. */
-    game->input.handbrake = 1.0f;
-    for (i = 0; i < 40; i++) game_fixed_update(game, FIXED_DT_S);
-    game->input.handbrake = 0.0f;
-    /* Force crash lockout and run one tick to let scoring classify. */
-    game->crashLockoutTimerS = CRASH_LOCKOUT_S;
-    game_fixed_update(game, FIXED_DT_S);
-    check(!game->derived.scoringDrift,
-          "post-crash lockout prevents scoringDrift (lockout %.3f s)",
-          (double)game->crashLockoutTimerS);
-    check(game->driftScore < 0.01f, "no score accrued during crash lockout");
-
-    /* --- Rejection 5: Past spin cutoff --- */
-    game_init(game);
-    /* Force a huge body sideslip — vx tiny, vy large gives atan2(-large, small) ~ -pi/2
-     * For SPIN_CUTOFF_RAD = 1.48: use vy = -20, vx = 2 → atan2(-20, 2) = -1.471
-     * Need abs > 1.48, so use vy = -20, vx = 1 → atan2(-20, 1) = -1.5208 rad > 1.48. */
-    game->vehicle.velocityLongitudinalMps = 1.0f;
-    game->vehicle.velocityLateralMps = -20.0f;
-    game->vehicle.yawRateRadS = 5.0f;
-    game->derived.speedMps = sqrtf(1.0f * 1.0f + 20.0f * 20.0f);
-    game->derived.bodySideslipRad = atan2f(-20.0f, 1.0f);
-    game->derived.rearSlipAngleRad = 0.30f;
-    /* Ensure sideslip exceeds SPIN_CUTOFF_RAD (1.48 rad ~ 85 deg). */
-    check(fabsf(game->derived.bodySideslipRad) > SPIN_CUTOFF_RAD,
-          "precondition: sideslip (%.3f rad) exceeds spin cutoff (%.3f rad)",
-          (double)fabsf(game->derived.bodySideslipRad), (double)SPIN_CUTOFF_RAD);
-    /* Call classify directly - physics would alter our carefully set state. */
-    scoring_classify(&game->vehicle, &game->derived, 0.0f);
-    check(!game->derived.scoringDrift, "past spin cutoff (%.3f rad > %.3f rad) does NOT score",
-          (double)fabsf(game->derived.bodySideslipRad), (double)SPIN_CUTOFF_RAD);
-
-    /* --- Rejection 6: both rear wheels off asphalt --- */
-    game_init(game);
-    game->vehicle.velocityLongitudinalMps = 16.0f;
-    game->vehicle.yawRateRadS = 1.2f;
-    game->derived.speedMps = 16.0f;
-    game->derived.bodySideslipRad = 0.45f;
-    game->derived.rearSlipAngleRad = 0.30f;
-    game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId = SURFACE_GRASS;
-    game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId = SURFACE_GRASS;
-    scoring_classify(&game->vehicle, &game->derived, 0.0f);
-    check(!game->derived.scoringDrift,
-          "both rear wheels on grass rejects scoring even with a valid slide");
-
-    /* Control: restoring one rear wheel to asphalt re-enables classification. */
-    game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId = SURFACE_ASPHALT;
-    scoring_classify(&game->vehicle, &game->derived, 0.0f);
-    check(game->derived.scoringDrift,
-          "one rear wheel on asphalt is enough for a valid slide to score");
-
-    free(game);
-}
-
-/*
- * crash-scoring-interaction: a REAL barrier impact (collision_resolve_track, not a
- * hand-set crashLockoutTimerS) must suppress an active scoring drift, and scoring must
- * resume once the lockout decays.
- *
- * Design note: velocity/yaw state is injected directly (matches scoring-rejection's
- * style) rather than built up over a scripted maneuver, so this is a test of the
- * scoring/collision GATE interaction, not of how any particular drift is initiated —
- * changing drift-entry tuning elsewhere cannot make this scenario flaky. Tick 1 proves
- * the injected state genuinely scores away from any wall; tick 2 teleports the same car
- * onto a real track barrier and proves collision_resolve_track's lockout (not a manual
- * override) suppresses it; the decay loop proves the lockout clears and the gate reopens.
- */
-static void scenario_crash_scoring_interaction(void)
-{
-    Game *game = alloc_game();
-    game_init(game);
-    track_init(&game->track);
-    input_zero(&game->input);
-
-    /* --- Tick 1: injected state genuinely scores, no barrier nearby --- */
-    game->vehicle.positionM = (Vector2){ 0.0f, 0.0f };
-    game->vehicle.headingRad = 0.0f;
-    game->vehicle.velocityLongitudinalMps = 18.0f;
-    game->vehicle.velocityLateralMps = 6.0f;
-    game->vehicle.yawRateRadS = 0.6f;
-    game->renderState.prevPositionM = game->vehicle.positionM;
-    game->renderState.currPositionM = game->vehicle.positionM;
-    game->renderState.prevHeadingRad = game->vehicle.headingRad;
-    game->renderState.currHeadingRad = game->vehicle.headingRad;
-
-    game_fixed_update(game, FIXED_DT_S);
-
-    check(game->derived.scoringDrift,
-          "the injected state genuinely scores away from any barrier");
-    const float scoreAfterTick1 = game->driftScore;
-    check(scoreAfterTick1 > 0.0f, "score accumulates on the scoring tick (%.4f)",
-          (double)scoreAfterTick1);
-    check(game->crashLockoutTimerS <= 0.0f, "no lockout is active before any collision");
-
-    /* --- Approach: teleport near the bottom barrier (centreline y=-75, halfWidth 4) and
-     * coast straight at it — a purely axial approach so the impact is unambiguously
-     * head-on. One tick moves ~0.15 m at 18 m/s, so this closes the ~3.5 m gap over
-     * roughly 25 ticks; the loop stops the instant a real collision arms the lockout. --- */
-    const float speedMps = 18.0f;
-    game->vehicle.positionM = (Vector2){ 0.0f, -145.0f };
-    game->vehicle.headingRad = -1.57079632679f; /* face -Y, straight at the barrier */
-    game->vehicle.velocityLongitudinalMps = speedMps;
-    game->renderState.currPositionM = game->vehicle.positionM;
-    game->renderState.prevHeadingRad = game->vehicle.headingRad;
-    game->renderState.currHeadingRad = game->vehicle.headingRad;
-    bool hitBarrier = false;
-    int approachTicks;
-    for (approachTicks = 0; approachTicks < 60 && !hitBarrier; approachTicks++) {
-        game_fixed_update(game, FIXED_DT_S);
-        if (game->crashLockoutTimerS > 0.0f) hitBarrier = true;
-    }
-
-    check(hitBarrier, "a real barrier impact sets crashLockoutTimerS within %d ticks",
-          approachTicks);
-    check(!game->derived.scoringDrift,
-          "scoring_classify rejects the drift while the live lockout is active");
-
-    /* --- Decay: let the lockout run down under its own physics (no re-injection, so a
-     * re-collision would be a real finding, not masked). --- */
-    const float scoreAtImpact = game->driftScore;
-    bool scoringWhileLocked = false;
-    bool scoreRoseWhileLocked = false;
-    int decayTicks;
-    for (decayTicks = 0; decayTicks < 300 && game->crashLockoutTimerS > 0.0f; decayTicks++) {
-        game_fixed_update(game, FIXED_DT_S);
-        if (game->crashLockoutTimerS > 0.0f) {
-            if (game->derived.scoringDrift) scoringWhileLocked = true;
-            if (game->driftScore > scoreAtImpact + 1e-4f) scoreRoseWhileLocked = true;
-        }
-    }
-
-    check(!scoringWhileLocked, "scoringDrift never flips true while the lockout is active");
-    check(!scoreRoseWhileLocked, "driftScore never rises while the lockout is active");
-    check(game->crashLockoutTimerS <= 0.0f,
-          "crashLockoutTimerS decays back to zero within %d ticks", decayTicks);
-
-    /* --- Resumption: re-inject the same scoring-eligible state once the lockout has
-     * cleared and confirm the gate reopens. The barrier sits at the edge of the asphalt
-     * AABB (halfWidth extends the collision zone to y=-79, outside the y>=-75 scoring
-     * surface), so the car is moved back onto open asphalt first — this scenario tests
-     * whether the LOCKOUT gate reopens, not whether the impact site itself is drivable. */
-    game->vehicle.positionM = (Vector2){ 0.0f, 0.0f };
-    game->renderState.prevPositionM = game->vehicle.positionM;
-    game->renderState.currPositionM = game->vehicle.positionM;
-    game->vehicle.velocityLongitudinalMps = 18.0f;
-    game->vehicle.velocityLateralMps = 6.0f;
-    game->vehicle.yawRateRadS = 0.6f;
-    game_fixed_update(game, FIXED_DT_S);
-    check(game->derived.scoringDrift, "scoring resumes once the lockout has fully decayed");
-
-    free(game);
-}
-
-/*
- * scoring-determinism: prove that scoring state changes do not feed back into any
- * physical force. Three sub-proofs:
- *
- *   1. Two identical runs produce identical checksums (basic determinism).
- *   2. Corrupting scoring state before every step produces the SAME checksum,
- *      proving the scoring fields are not read by any force computation.
- *   3. Vehicle states are bit-identical after the corrupted run, proving no
- *      scoring state leaked into integration.
- */
-static void scenario_scoring_determinism(void)
-{
-    Game *a = alloc_game();
-    Game *b = alloc_game();
-    game_init(a);
-    game_init(b);
-
-    /* Give both games the same initial rolling speed and inputs. */
-    set_vehicle_rolling_speed(a, 14.0f);
-    set_vehicle_rolling_speed(b, 14.0f);
-
-    /* Run 150 ticks with handbrake + steer to build a slide. */
-    const float steerInputs[] = { 0.35f, 0.35f, 0.35f, 0.35f, -0.10f };
-    const float throttleInputs[] = { 0.80f, 0.80f, 0.40f, 0.30f, 0.00f };
-    const float handbrakeInputs[] = { 1.0f, 0.5f, 0.0f, 0.0f, 0.0f };
-    const int switchTicks[] = { 0, 20, 40, 60, 90 };
-    int sw = 0;
-    int i;
-
-    for (i = 0; i < 150; i++) {
-        while (sw < 4 && i >= switchTicks[sw + 1]) sw++;
-        a->input.steer = steerInputs[sw];
-        a->input.throttle = throttleInputs[sw];
-        a->input.handbrake = handbrakeInputs[sw];
-        b->input.steer = steerInputs[sw];
-        b->input.throttle = throttleInputs[sw];
-        b->input.handbrake = handbrakeInputs[sw];
-
-        /* Sabotage b's scoring state before the step. */
-        b->driftScore = (float)(i * 137);
-        b->bestScore = (float)(i * 251);
-        b->driftTimeS = (float)(i % 10);
-        b->comboMultiplier = (float)((i % 5) + 1.0f);
-        b->comboTimerS = (float)(i % 3);
-        b->derived.scoringDrift = ((i & 1) == 0);
-        b->derived.physicallySliding = ((i & 2) == 0);
-
-        game_fixed_update(a, FIXED_DT_S);
-        game_fixed_update(b, FIXED_DT_S);
-    }
-
-    /* Proof 1: checksums match — scoring state changes produced identical physics. */
-    check(a->stateChecksum == b->stateChecksum,
-          "identical inputs produce identical physics checksums (%08x vs %08x)",
-          a->stateChecksum, b->stateChecksum);
-
-    /* Proof 2: vehicle states are bit-identical (scoring never touched them). */
-    check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
-          "vehicle states are bit-identical after scoring corruption");
-
-    free(b);
-    free(a);
-}
-
-/* Helper for the highscore-persistence scenario: write a string to a file. */
-static void hs_write_file(const char *path, const char *contents)
-{
-    FILE *f = fopen(path, "w");
-    if (f) {
-        fprintf(f, "%s", contents);
-        fclose(f);
-    }
-}
-
-/* Helper: read and validate exactly like persistence_load_score in game.c. */
-static float hs_read_score(const char *path)
-{
-    FILE *f = fopen(path, "r");
-    if (!f) return 0.0f;
-    long parsed = 0;
-    int matched = fscanf(f, "%ld", &parsed);
-    fclose(f);
-    if (matched == 1 && parsed >= 0 && parsed <= (long)MAX_VALID_SCORE) return (float)parsed;
-    return 0.0f;
-}
-
-/*
- * highscore-persistence: file I/O validation for the score persistence pattern.
- *   - Round-trip a known score
- *   - Reject garbage/corrupted data
- *   - Reject out-of-range values
- *   - Reject negative values
- * Uses standard C I/O (the same pattern persistence_load_score uses).
- */
-static void scenario_highscore_persistence(void)
-{
-    const char *tempPath = TELEMETRY_DIR "/_test_highscore.txt";
-    float loaded;
-    char buf[32];
-
-    /* The fixture lives under the telemetry root, which a clean checkout does not have yet.
-     * Deliberately not a check(): this scenario asserts score persistence, and adding an
-     * assertion here would change the suite's check count for an unrelated reason. */
-    (void)telemetry_ensure_dir(TELEMETRY_DIR);
-    remove(tempPath);
-
-    /* --- Round-trip: write 12345, read back --- */
-    hs_write_file(tempPath, "12345");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 12345.0) < 0.5,
-          "score 12345 round-trips through file (got %.0f)", (double)loaded);
-
-    /* --- Round-trip: write 0, read back --- */
-    hs_write_file(tempPath, "0");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5, "score 0 round-trips (got %.0f)", (double)loaded);
-
-    /* --- Round-trip: write MAX_VALID_SCORE, read back --- */
-    snprintf(buf, sizeof(buf), "%ld", (long)MAX_VALID_SCORE);
-    hs_write_file(tempPath, buf);
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - (double)MAX_VALID_SCORE) < 0.5,
-          "MAX_VALID_SCORE round-trips (got %.0f)", (double)loaded);
-
-    /* --- Reject garbage: write "hello world" --- */
-    hs_write_file(tempPath, "hello world");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5,
-          "garbage file is rejected, bestScore stays at 0 (got %.0f)", (double)loaded);
-
-    /* --- Reject empty file --- */
-    hs_write_file(tempPath, "");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5, "empty file is rejected (got %.0f)",
-          (double)loaded);
-
-    /* --- Reject out-of-range value (> MAX_VALID_SCORE) --- */
-    hs_write_file(tempPath, "9999999999");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5,
-          "out-of-range value 9999999999 (>%ld) is rejected (got %.0f)", (long)MAX_VALID_SCORE,
-          (double)loaded);
-
-    /* --- Reject negative value --- */
-    hs_write_file(tempPath, "-42");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5, "negative value -42 is rejected (got %.0f)",
-          (double)loaded);
-
-    /* --- Leading integer in "100abc" is parsed (fscanf behaviour) --- */
-    hs_write_file(tempPath, "100abc");
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 100.0) < 0.5,
-          "leading integer in '100abc' is parsed as 100 (got %.0f)", (double)loaded);
-
-    /* --- File does not exist --- */
-    remove(tempPath);
-    loaded = hs_read_score(tempPath);
-    check(fabs((double)loaded - 0.0) < 0.5, "missing file returns default 0 (got %.0f)",
-          (double)loaded);
-
-    remove(tempPath);
 }
 
 /* -------------------------------------------------------------------------------------
@@ -1683,19 +1171,13 @@ static void scenario_state_machine(void)
     check(game->state == STATE_MENU, "state can be set to STATE_MENU (got %d)",
           (int)game->state);
 
-    /* --- MENU + pause → PLAYING (with vehicle reset and score zeroed). --- */
+    /* --- MENU + pause → PLAYING (with vehicle reset). --- */
     game->vehicle.positionM.x = 100.0f;
-    game->driftScore = 500.0f;
-    game->driftTimeS = 3.0f;
-    game->comboMultiplier = 2.5f;
-    game->comboTimerS = 1.0f;
     game->input.pausePressed = true;
     game_fixed_update(game, FIXED_DT_S);
     check(game->state == STATE_PLAYING, "pause from MENU → PLAYING (got %d)", (int)game->state);
     check_near((double)game->vehicle.positionM.x, 0.0, 1e-6,
                "vehicle reset to origin on MENU→PLAYING");
-    check_near((double)game->driftScore, 0.0, 0.5, "score zeroed on MENU→PLAYING");
-    check_near((double)game->comboMultiplier, 1.0, 1e-6, "combo reset on MENU→PLAYING");
 
     /* --- PLAYING + pause → PAUSED. --- */
     game->input.pausePressed = true;
@@ -1709,40 +1191,34 @@ static void scenario_state_machine(void)
     check(game->state == STATE_PLAYING, "pause from PAUSED → PLAYING (got %d)",
           (int)game->state);
 
-    /* --- PLAYING + reset → PLAYING (vehicle reset, score zeroed). --- */
+    /* --- PLAYING + reset → PLAYING (vehicle reset). --- */
     game->vehicle.positionM.x = 150.0f;
-    game->driftScore = 250.0f;
     game->input.resetPressed = true;
     game_fixed_update(game, FIXED_DT_S);
     check(game->state == STATE_PLAYING, "reset during PLAYING stays PLAYING (got %d)",
           (int)game->state);
     check_near((double)game->vehicle.positionM.x, 0.0, 1e-6, "vehicle reset on PLAYING reset");
-    check_near((double)game->driftScore, 0.0, 0.5, "score zeroed on PLAYING reset");
 
     /* --- PAUSED + reset → PLAYING (vehicle reset). --- */
     game->input.pausePressed = true;
     game_fixed_update(game, FIXED_DT_S);
     check(game->state == STATE_PAUSED, "in PAUSED before reset test");
     game->vehicle.positionM.x = 50.0f;
-    game->driftScore = 100.0f;
     game->input.resetPressed = true;
     game_fixed_update(game, FIXED_DT_S);
     check(game->state == STATE_PLAYING, "reset during PAUSED → PLAYING (got %d)",
           (int)game->state);
     check_near((double)game->vehicle.positionM.x, 0.0, 1e-6, "vehicle reset on PAUSED reset");
 
-    /* --- RESULTS + pause → PLAYING (reset + score zeroed). --- */
+    /* --- RESULTS + pause → PLAYING (reset). --- */
     game->state = STATE_RESULTS;
     game->vehicle.positionM.x = 200.0f;
-    game->driftScore = 750.0f;
     game->input.pausePressed = true;
     game_fixed_update(game, FIXED_DT_S);
     check(game->state == STATE_PLAYING, "pause from RESULTS → PLAYING (got %d)",
           (int)game->state);
     check_near((double)game->vehicle.positionM.x, 0.0, 1e-6,
                "vehicle reset on RESULTS→PLAYING");
-    check_near((double)game->driftScore, 0.0, 0.5, "score zeroed on RESULTS→PLAYING");
-
     /* --- RESULTS + reset → MENU. --- */
     game->state = STATE_RESULTS;
     game->input.resetPressed = true;
@@ -1992,140 +1468,6 @@ static void scenario_lap_average(void)
     free(frames);
 }
 
-/*
- * scenario_scoring_combo_sweep — exercises the combo-multiplier formula,
- * cap, and score-accrual monotonicity by directly setting driftTimeS and
- * scoringDrift rather than driving a full physics simulation. The formula
- *   comboMultiplier = clampf(1.0f + driftTimeS * 0.5f, 1.0f, 4.0f)
- * is a pure gameplay computation (scoring.c:97); testing it this way is
- * deterministic and independent of any particular vehicle tune or
- * handbrake-entry recipe.
- *
- * Also asserts the COMBO_GRACE_S reset path: after scoringDrift goes false
- * for >= 1.5 s, multiplier and driftTimeS both return to their defaults.
- */
-static void scenario_scoring_combo_sweep(void)
-{
-    Game *game = alloc_game();
-    game_init(game);
-
-    /* --- Combo multiplier rises with drift time --- */
-    {
-        const float testDurationsS[] = {
-            0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 10.0f
-        };
-        const float expectedCombo[] = { 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.0f, 4.0f };
-        const int n = sizeof(testDurationsS) / sizeof(testDurationsS[0]);
-
-        for (int i = 0; i < n; i++) {
-            game->driftTimeS = testDurationsS[i];
-            game->derived.scoringDrift = true;
-            scoring_update(game, FIXED_DT_S);
-            const float expected = expectedCombo[i];
-            check(fabsf(game->comboMultiplier - expected) <= 0.02f,
-                  "driftTimeS %.1f s -> combo %.1f (got %.3f)", (double)testDurationsS[i],
-                  (double)expected, (double)game->comboMultiplier);
-        }
-    }
-
-    /* --- Multiplier never exceeds 4.0 at extreme durations --- */
-    {
-        game->driftTimeS = 100.0f;
-        game->derived.scoringDrift = true;
-        scoring_update(game, FIXED_DT_S);
-        check(game->comboMultiplier <= 4.0f + 1e-4f,
-              "combo capped at 4.0 even after 100 s drift (got %.3f)",
-              (double)game->comboMultiplier);
-        check(game->comboMultiplier >= 4.0f - 0.01f, "combo reaches 4.0 after 6+ s (got %.3f)",
-              (double)game->comboMultiplier);
-    }
-
-    /* --- Multiplier never below 1.0 --- */
-    {
-        game->driftTimeS = -5.0f;
-        game->derived.scoringDrift = true;
-        scoring_update(game, FIXED_DT_S);
-        check(game->comboMultiplier >= 1.0f - 1e-4f,
-              "combo clamped to >= 1.0 with negative driftTimeS (got %.3f)",
-              (double)game->comboMultiplier);
-    }
-
-    /* --- COMBO_GRACE_S reset: not scoring for >= 1.5 s resets everything --- */
-    {
-        /* Build up combo first */
-        game->driftTimeS = 3.0f;
-        game->derived.scoringDrift = true;
-        scoring_update(game, FIXED_DT_S);
-        check(game->comboMultiplier > 2.0f,
-              "combo is above 2.0 before grace-period test (%.3f)",
-              (double)game->comboMultiplier);
-
-        /* Stop scoring for COMBO_GRACE_S. Use 181 ticks (not 180) to account for
-         * floating-point accumulation: 180 * (1/120) may be slightly < 1.5 in fp32. */
-        game->derived.scoringDrift = false;
-        int i;
-        for (i = 0; i < 181; i++) scoring_update(game, FIXED_DT_S);
-
-        check(fabsf(game->comboMultiplier - 1.0f) <= 0.02f,
-              "combo resets to 1.0 after COMBO_GRACE_S (got %.3f)",
-              (double)game->comboMultiplier);
-        check(fabsf(game->driftTimeS) <= 0.02f,
-              "driftTimeS resets to 0 after COMBO_GRACE_S (got %.3f)",
-              (double)game->driftTimeS);
-    }
-
-    /* --- Short gap (< GRACE_S) does NOT reset --- */
-    {
-        game->driftTimeS = 2.0f;
-        game->derived.scoringDrift = true;
-        scoring_update(game, FIXED_DT_S);
-        const float beforeGap = game->comboMultiplier;
-
-        /* Stop scoring for 0.5 s (less than GRACE_S) */
-        game->derived.scoringDrift = false;
-        int i;
-        for (i = 0; i < 60; i++) scoring_update(game, FIXED_DT_S);
-
-        check(game->comboMultiplier > 1.5f,
-              "combo survives a sub-GRACE_S gap (%.3f after 0.5 s gap, was %.3f)",
-              (double)game->comboMultiplier, (double)beforeGap);
-
-        /* Resume scoring — driftTimeS should continue from where it left off */
-        game->derived.scoringDrift = true;
-        scoring_update(game, FIXED_DT_S);
-        check(game->comboMultiplier > beforeGap,
-              "combo resumes accumulating after sub-GRACE_S gap (%.3f > %.3f)",
-              (double)game->comboMultiplier, (double)beforeGap);
-    }
-
-    /* --- Score accrual: score rises monotonically with drift time --- */
-    {
-        game->driftTimeS = 0.0f;
-        game->driftScore = 0.0f;
-        game->derived.scoringDrift = true;
-
-        /* Set derived fields to the reference values so each scoring factor
-         * is exactly 1.0: angleFactor peaks at SPIN_CUTOFF_RAD, speedFactor at
-         * SCORE_SPEED_REF_MPS. */
-        game->derived.bodySideslipRad = (float)SPIN_CUTOFF_RAD;
-        game->derived.speedMps = (float)SCORE_SPEED_REF_MPS;
-        game->track.isParkingLot = true;
-
-        float prevScore = 0.0f;
-        for (int i = 0; i < 100; i++) {
-            scoring_update(game, FIXED_DT_S);
-            check(game->driftScore >= prevScore - 1e-6f,
-                  "score never decreases while scoring (tick %d: %.3f -> %.3f)", i,
-                  (double)prevScore, (double)game->driftScore);
-            prevScore = game->driftScore;
-        }
-        check(game->driftScore > 10.0f, "score accumulates meaningfully over 100 ticks (%.1f)",
-              (double)game->driftScore);
-    }
-
-    free(game);
-}
-
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
@@ -2136,18 +1478,6 @@ static const TestScenario kGameplayScenarios[] = {
     { "collision-units",
       "direct collision_resolve_track tests: count, push, impulse, multi-contact",
       scenario_collision_units },
-    { "scoring-accumulation", "score accrues during a drift; combo multiplier rises and resets",
-      scenario_scoring_accumulation },
-    { "scoring-rejection",
-      "low speed, reverse, spin, crash, spin-cutoff, and off-asphalt rejected",
-      scenario_scoring_rejection },
-    { "crash-scoring-interaction",
-      "a live barrier impact suppresses scoring; scoring resumes once it decays",
-      scenario_crash_scoring_interaction },
-    { "scoring-determinism", "scoring state provably changes no physical force or checksum",
-      scenario_scoring_determinism },
-    { "highscore-persistence", "file load/save, garbage, range, and negative-value validated",
-      scenario_highscore_persistence },
     { "checkpoint-lap", "ordered gates, out-of-order detection, forward-only, and lap timing",
       scenario_checkpoint_lap },
     { "track-runoff", "three surface bands and barriers standing at the runoff edge",
@@ -2158,13 +1488,9 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_ai_lap },
     { "particle-pool", "init, spawn, round-robin wrap, update, and lifecycle",
       scenario_particle_pool },
-    { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions and scoring reset",
-      scenario_state_machine },
+    { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions", scenario_state_machine },
     { "lap-average", "perimeter drive recorded once, replayed 10x: checksum, gates, energy",
       scenario_lap_average },
-    { "scoring-combo-sweep",
-      "combo multiplier over duration x entry-speed grid (3 speeds x 3 durations)",
-      scenario_scoring_combo_sweep },
 };
 
 TestScenarioGroup test_gameplay_scenarios(void)

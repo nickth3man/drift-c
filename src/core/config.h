@@ -301,22 +301,9 @@
 #define COLLISION_RESTITUTION 0.30f     /* dimensionless; barrier bounce (< 1) */
 #define COLLISION_FRICTION 0.50f        /* dimensionless; Coulomb friction at impact */
 
-/* Scoring lockout after a barrier impact (Phase 6). Timer starts counting down from this. */
-#define CRASH_LOCKOUT_S 1.0f /* seconds; post-impact scoring suspension */
-
-/* Drift classification thresholds (Phase 6). Gameplay rules, not physical tunables:
- * these are compile-time constants that never feed back into the force model. */
-#define MIN_DRIFT_SPEED_MPS 5.0f      /* m/s; below this speed a slide is not scored */
-#define MIN_DRIFT_ANGLE_RAD 0.175f    /* rad (~10 deg); minimum body sideslip for scoring */
-#define MIN_REAR_SLIP_RAD 0.12f       /* rad; minimum rear-axle slip for scoring */
-#define MIN_DRIFT_YAW_RATE_RADS 0.25f /* rad/s; minimum yaw rate for scoring */
-#define SPIN_CUTOFF_RAD 1.48f         /* rad (~85 deg); beyond this the car has spun */
-
-/* Score accumulation (Phase 6). Points are accrued per fixed tick while scoringDrift is true. */
-#define SCORE_BASE_RATE 100.0f    /* points/second at full factors and base multiplier */
-#define SCORE_SPEED_REF_MPS 35.0f /* m/s; the speed at which speedFactor saturates */
-#define COMBO_GRACE_S 1.50f /* s; reset multiplier after this long outside a scoring drift */
-#define MAX_VALID_SCORE 100000000L /* upper bound for file-load validation and clamping */
+/* Collision lockout after a barrier impact. Timer starts counting down from this; the
+ * rising edge is the collision event the Phase 5 metrics layer counts. */
+#define CRASH_LOCKOUT_S 1.0f /* seconds; post-impact lockout */
 
 /* Phase 6 results trigger (presentation only; no effect on simulation). */
 #define RESULTS_TARGET_LAPS 3 /* laps to complete before entering STATE_RESULTS */
@@ -354,14 +341,12 @@
 #define MAX_PARTICLES 512     /* total slots in the round-robin particle pool */
 #define PARTICLE_LIFE_S 0.80f /* seconds a smoke particle lives before fading out */
 
-/* Phase 6 camera drift zoom ------------------------------------------------- */
+/* Camera zoom -------------------------------------------------------------- */
 
 #define CAMERA_BASE_ZOOM 0.55f      /* dimensionless; >1 magnifies (zooms in) */
-#define CAMERA_ZOOM_RANGE 0.10f     /* dimensionless; subtracted at full drift -> 0.45 */
 #define CAMERA_MIN_ZOOM 0.30f       /* dimensionless; must stay > 0 */
 #define CAMERA_ZOOM_RATE 4.0f       /* 1/second smoothing rate */
 #define CAMERA_LOOKAHEAD 0.25f      /* seconds of velocity lookahead (reserved) */
-#define DRIFT_ZOOM_REF_RAD 0.70f    /* sideslip mapped to full zoom-out */
 #define SLIDE_USAGE_THRESHOLD 0.98f /* dimensionless friction usage = physically sliding */
 
 /* Pixel-art world pass ------------------------------------------------------
