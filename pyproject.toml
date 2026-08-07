@@ -1,0 +1,43 @@
+# Python tooling for the repository's dev scripts under tools/ and scripts/.
+#
+# There is deliberately no [project] table: none of this is an installable package, it is a
+# set of standalone scripts invoked by path from the Makefile. Declaring a package here would
+# make `pip install -e .` appear to work and then discover there is nothing to import.
+#
+# Runtime dependencies live in requirements-dev.txt. Almost everything here is deliberately
+# pure-stdlib — compare_car_rgba.py ships its own PNG decoder rather than take a Pillow
+# dependency — and that property is worth keeping.
+
+[tool.ruff]
+# Close to ColumnLimit 96 in .clang-format, but chosen the same way that file was: by
+# encoding the width the code is already written to rather than importing someone else's.
+# The maintained tools sit at a 99-112 max and a p99 of 106; 100 costs four reflowed lines,
+# where 96 would cost twelve for no readability gain.
+line-length = 100
+target-version = "py39"
+extend-exclude = [
+    "third_party",
+    "tools/visual/node_modules",
+    "build",
+    "artifacts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes: undefined names, unused imports
+    "W",   # pycodestyle warnings
+    "I",   # import sorting
+    "B",   # flake8-bugbear: likely bugs
+]
+# UP (pyupgrade) is deliberately off. The scripts consistently use
+# `from __future__ import annotations` with typing.Dict/List/Optional; modernising that is a
+# real change to every file and belongs in its own reviewable commit, not in a lint rollout.
+
+[tool.ruff.lint.per-file-ignores]
+# tools/telemetry/* deliberately mutate sys.path before importing telemetry_common, because
+# they are run by path rather than as a package. The import genuinely cannot come first.
+"tools/telemetry/*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"

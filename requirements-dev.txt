@@ -1,0 +1,14 @@
+# Third-party packages the dev scripts need. Install with:
+#
+#   pip install -r requirements-dev.txt
+#
+# Keep this list short. Most tooling here is pure-stdlib on purpose: compare_car_rgba.py
+# implements PNG decoding itself rather than depend on Pillow, which means the appearance
+# regression checks run on a bare Python with nothing installed. Prefer that where it is
+# reasonable, and add a dependency here rather than importing something undeclared.
+
+# Linter and formatter for everything under tools/ and scripts/. Configured in pyproject.toml.
+ruff==0.15.20
+
+# Frame extraction in scripts/run_gameplay_recording.py.
+pillow>=10.0
