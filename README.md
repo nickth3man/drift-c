@@ -330,3 +330,12 @@ third_party/raygui/             vendored raygui, development builds only
 artifacts/                      telemetry CSV, reports, screenshots, replays,
                                 failure bundles, cards, gallery (all gitignored)
 ```
+
+## Licence
+
+Drifty is MIT licensed. See [LICENSE](LICENSE).
+
+Vendored third-party sources under `third_party/` keep their own licences — raygui is
+zlib/libpng and stb_image_write is dual public domain / MIT. Neither is linked into the
+release build. [third_party/README.md](third_party/README.md) records the provenance,
+the exact version, and the licence of each one.
