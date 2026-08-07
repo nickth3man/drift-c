@@ -21,8 +21,10 @@
 #include "support/appearance_metrics.h"
 #include "support/car_sheet.h"
 #include "dev/car_corpus.h"
+#include "render/car_appearance.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
+#include "render/vehicle_effects.h"
 #include "core/config.h"
 #include "dev/dev_params.h"
 #include "dev/dev_replay.h"
@@ -1187,9 +1189,63 @@ static void scenario_signature_invariants(void)
     }
 }
 
+/* The render-only scaffolds carry published contracts but no feature yet. These checks are
+ * their first consumer, so the headers are compiled and exercised rather than merely shipped,
+ * and they assert only what stays true once the real derivations land. */
+static void scenario_render_contracts(void)
+{
+    /* A NULL input returns a zeroed effect state — permanent, not placeholder behaviour. */
+    {
+        const VehicleVisualEffects zero = vehicle_visual_effects_derive(NULL);
+        bool allZero = (zero.brakeLamp01 == 0.0f) && (zero.bodyRollRad == 0.0f) &&
+                       (zero.shadowOffsetBodyM.x == 0.0f) && (zero.shadowOffsetBodyM.y == 0.0f);
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            if (zero.tireSmoke01[i] != 0.0f) allZero = false;
+        }
+        check(allZero, "vehicle_visual_effects_derive(NULL) is a zeroed effect state");
+    }
+
+    /* A populated input stays bounded and finite. The placeholder satisfies this trivially;
+     * the real derivation must satisfy it too, so this check outlives the stub. */
+    {
+        VehicleEffectInputs in;
+        memset(&in, 0, sizeof(in));
+        in.brakeInput01 = 1.0f;
+        in.filteredLateralAccelerationMps2 = 12.0f;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            in.frictionUsage01[i] = 1.0f;
+            in.slipAngleRad[i] = 0.6f;
+            in.slipRatio[i] = 0.9f;
+            in.surface[i] = SURFACE_ASPHALT;
+        }
+
+        const VehicleVisualEffects fx = vehicle_visual_effects_derive(&in);
+        bool bounded = (fx.brakeLamp01 >= 0.0f && fx.brakeLamp01 <= 1.0f) &&
+                       isfinite(fx.bodyRollRad) && isfinite(fx.shadowOffsetBodyM.x) &&
+                       isfinite(fx.shadowOffsetBodyM.y);
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            if (!(fx.tireSmoke01[i] >= 0.0f && fx.tireSmoke01[i] <= 1.0f)) bounded = false;
+        }
+        check(bounded, "derived effects stay bounded and finite for a saturated input");
+    }
+
+    /* CarAppearanceSpec's presence bit: a zero-initialised spec means "no explicit seed", so
+     * seed 0 is a usable identity rather than a sentinel. */
+    {
+        const CarAppearanceSpec implicit = { 0 };
+        check(!implicit.hasSeed, "a zero-initialised CarAppearanceSpec carries no seed");
+
+        const CarAppearanceSpec explicitZero = { true, 0u };
+        check(explicitZero.hasSeed && explicitZero.seed == 0u,
+              "seed 0 is a valid explicit identity, distinct from absence");
+    }
+}
+
 static const TestScenario kAppearanceScenarios[] = {
     { "car-visual", "appearance is a pure, total function of VehicleSpec",
       scenario_car_visual },
+    { "render-contracts", "render-only scaffolds honour their published contracts",
+      scenario_render_contracts },
     { "corpus", "every corpus vehicle is valid and visibly distinct", scenario_corpus },
     { "signature-invariants", "retired invisible/collinear slots, exhaust area-continuity",
       scenario_signature_invariants },

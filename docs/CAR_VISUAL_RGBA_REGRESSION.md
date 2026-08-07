@@ -40,10 +40,25 @@ python scripts/compare_car_rgba.py BASELINE.png CANDIDATE.png \
   --max-alpha-xor-ratio 0 \
   --max-differing-ratio 1 \
   --max-rgb-rmse 80 \
+  --max-rgba-rmse 80 \
   --max-channel-delta 255
 ```
 
 Machine-readable output is available with `--json`.
+
+Every reported metric has a matching threshold flag, and all default to zero:
+
+| Metric | Flag | Measures |
+|---|---|---|
+| `differing_ratio` | `--max-differing-ratio` | fraction of pixels whose RGBA differs at all |
+| `alpha_xor_ratio` | `--max-alpha-xor-ratio` | silhouette occupancy change, over the alpha union |
+| `rgb_rmse` | `--max-rgb-rmse` | colour error ignoring alpha |
+| `rgba_rmse` | `--max-rgba-rmse` | colour error including alpha |
+| `max_channel_delta` | `--max-channel-delta` | worst single-channel difference |
+
+Prefer `--max-rgb-rmse` for palette work, where alpha is expected to be exact and folding it
+into the average would dilute the signal. `--max-rgba-rmse` is the stricter one to reach for
+when partial transparency is itself under review.
 
 ## Intended CI integration
 

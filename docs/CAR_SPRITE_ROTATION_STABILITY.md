@@ -33,12 +33,41 @@ Optional thresholds turn the measurement into a gate:
 
 ```text
 python scripts/measure_sprite_rotation.py CAR.png \
+  --steps 128 \
   --max-occupied-span-ratio 0.08 \
   --max-centroid-drift-px 0.75 \
   --max-adjacent-xor-ratio 0.35
 ```
 
+Always pass `--steps` explicitly when gating: the XOR threshold is only meaningful against a
+fixed step count. See the reference measurements below.
+
 The command returns `0` when thresholds pass, `1` when a threshold fails, and `2` for input errors.
+
+## Reference measurements
+
+Recorded at commit `8bd8805`, from cards written by `--dump-corpus-cards` at the default bake
+scale, with `--steps 128` and the default centroid pivot. `--dump-corpus-cards` is deterministic,
+and so is this tool, so these reproduce exactly:
+
+| Corpus entry | Size | Occupied area | Span | Max drift | XOR mean | XOR max |
+|---|---|---|---|---|---|---|
+| `archetype_00_stock_baseline` | 35x63 | 1217..1234 | 1.39% | 0.537 px | 7.21% | 7.99% |
+| `archetype_01_kei_car` | 31x51 | 821..834 | 1.57% | 0.576 px | 7.28% | 8.36% |
+| `archetype_10_open_wheel` | 55x67 | 1245..1267 | 1.75% | 0.358 px | 10.46% | 10.96% |
+| `archetype_14_bus` | 45x133 | 3833..3874 | 1.06% | 0.277 px | 10.37% | 11.28% |
+| `archetype_16_box_truck` | 42x107 | 2931..2968 | 1.25% | 0.140 px | 9.24% | 9.82% |
+
+Two properties of the metrics matter more than any single number here.
+
+**Area span and centroid drift are independent of `--steps`.** They describe the sprite, so the
+same values come back at 32, 64, 128, or 256 steps.
+
+**Adjacent-heading XOR is not.** It measures the change between neighbouring headings, so it
+falls roughly by half each time the step count doubles — for `archetype_01_kei_car`: 21.84% at
+32 steps, 12.91% at 64, 7.28% at 128, 3.97% at 256. An XOR figure is therefore meaningless
+without the step count beside it, and `--max-adjacent-xor-ratio` may only be compared against
+runs that fix `--steps` to the same value. Quote the step count whenever you quote the metric.
 
 ## How to use the result
 

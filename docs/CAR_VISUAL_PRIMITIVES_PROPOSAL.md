@@ -21,6 +21,22 @@ The current rasterizer still invents several visible dimensions and placements, 
 
 Some of those formulas also include `onePx`, which makes the effective geometry depend on raster scale. That weakens the documented separation between the metre-based grammar and the pixel rasterizer, and it leaves some visible decisions outside the diagnostic signature.
 
+### The duplication has already drifted
+
+The strongest evidence that this belongs in `car_visual_derive()` is that the rasterizer already
+holds each of these formulas twice: once in `car_raster_info()` to size the canvas, and once in
+`render()` to draw. The two copies disagree today:
+
+| Feature | `car_raster_info()` extent | `render()` draw |
+|---|---|---|
+| Canard lateral offset | `widthM * 0.48` | `widthM * 0.44` |
+| Mirror lateral margin | `mirrorOffsetM + 0.06` | width `0.10`, i.e. `mirrorOffsetM + 0.05` |
+
+Both divergences happen to be conservative, so the canvas is slightly larger than the drawn
+geometry needs and nothing clips. That is luck, not design: the same duplication with the signs
+reversed silently crops a feature at the texture edge. A single derived primitive read by both
+call sites removes the failure mode rather than relying on the margin staying generous.
+
 ## Goal
 
 Make every visible primitive a deterministic field of `CarVisual`. After this migration, `car_visual_raster.c` should make only these decisions:

@@ -224,6 +224,8 @@ def _failures(metrics: Metrics, args: argparse.Namespace) -> Iterable[str]:
         )
     if metrics.rgb_rmse > args.max_rgb_rmse:
         yield f"RGB RMSE {metrics.rgb_rmse:.6f} exceeds {args.max_rgb_rmse:.6f}"
+    if metrics.rgba_rmse > args.max_rgba_rmse:
+        yield f"RGBA RMSE {metrics.rgba_rmse:.6f} exceeds {args.max_rgba_rmse:.6f}"
     if metrics.max_channel_delta > args.max_channel_delta:
         yield (
             f"max channel delta {metrics.max_channel_delta} exceeds "
@@ -240,6 +242,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-differing-ratio", type=float, default=0.0)
     parser.add_argument("--max-alpha-xor-ratio", type=float, default=0.0)
     parser.add_argument("--max-rgb-rmse", type=float, default=0.0)
+    parser.add_argument("--max-rgba-rmse", type=float, default=0.0)
     parser.add_argument("--max-channel-delta", type=int, default=0)
     parser.add_argument("--json", action="store_true", help="emit machine-readable metrics")
     args = parser.parse_args(argv)
@@ -250,6 +253,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--max-alpha-xor-ratio must be in [0, 1]")
     if args.max_rgb_rmse < 0.0:
         parser.error("--max-rgb-rmse must be non-negative")
+    if args.max_rgba_rmse < 0.0:
+        parser.error("--max-rgba-rmse must be non-negative")
     if not 0 <= args.max_channel_delta <= 255:
         parser.error("--max-channel-delta must be in [0, 255]")
     return args
@@ -277,6 +282,7 @@ def main(argv: list[str]) -> int:
             f"alpha_xor={metrics.alpha_xor_pixels}/{metrics.alpha_union_pixels} "
             f"({metrics.alpha_xor_ratio:.6%}), "
             f"rgb_rmse={metrics.rgb_rmse:.6f}, "
+            f"rgba_rmse={metrics.rgba_rmse:.6f}, "
             f"max_delta={metrics.max_channel_delta}"
         )
         for failure in failures:

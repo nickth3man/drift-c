@@ -127,7 +127,7 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 # Paths must stay repository-relative and free of whitespace and apostrophes: one manifest is
 # consumed by both Make and POSIX shell.
 
-SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c
+SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c
 DEV_SRCS    := src/dev/dev_params.c src/dev/dev_presets.c src/dev/dev_replay.c src/dev/dev_state.c \
                src/dev/failure_bundle.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
 DEV_UI_SRCS := src/dev/dev_lab.c
