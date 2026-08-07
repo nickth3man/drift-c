@@ -47,6 +47,9 @@ static void print_usage(const char *argv0)
            argv0);
     printf("       %s --measure-sweep KEY       can this key carry a corpus sweep row?\n",
            argv0);
+    printf("       %s --list-cars               list validation roster car ids\n", argv0);
+    printf("       %s --generate-roster [DIR]   export roster cars as tuning profiles\n",
+           argv0);
 }
 
 /* Write one XML-safe character; returns the number of bytes written. */
@@ -137,6 +140,13 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[i], "--generate-corpus") == 0) {
             return test_generate_corpus((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
+                                                                                : NULL);
+        }
+        if (strcmp(argv[i], "--list-cars") == 0) {
+            return test_list_cars();
+        }
+        if (strcmp(argv[i], "--generate-roster") == 0) {
+            return test_generate_roster((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
                                                                                 : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-index") == 0) {

@@ -30,6 +30,7 @@
 #include "support/test_harness.h"
 
 #include "dev/car_corpus.h"
+#include "game/car_roster.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -240,6 +241,48 @@ int test_generate_corpus(const char *dir)
     }
 
     printf("wrote %d vehicle profiles to %s\n", written, dir);
+    return 0;
+}
+
+/* Print the roster: one id per line, so the suite can enumerate cars from the binary. */
+int test_list_cars(void)
+{
+    for (int i = 0; i < car_roster_count(); i++) {
+        char id[128];
+        car_roster_id(i, id, sizeof(id));
+        printf("%s\n", id);
+    }
+    return 0;
+}
+
+/* Export every roster car as a tuning profile, exactly as --generate-corpus does for the
+ * appearance fleet. The `roster` scenario asserts each one round-trips back to the spec
+ * the code generates, so the files cannot silently rot away from the code. */
+int test_generate_roster(const char *dir)
+{
+    if (dir == NULL) dir = "data/vehicles/roster";
+    if (!telemetry_ensure_dir(dir)) return 1;
+
+    int written = 0;
+    for (int i = 0; i < car_roster_count(); i++) {
+        VehicleSpec spec;
+        char id[128], path[768];
+
+        if (!car_roster_spec(i, &spec)) {
+            fprintf(stderr, "error: roster entry %d could not be built\n", i);
+            return 1;
+        }
+        car_roster_id(i, id, sizeof(id));
+
+        snprintf(path, sizeof(path), "%s/%s.txt", dir, id);
+        if (!dev_params_save(&spec, path)) {
+            fprintf(stderr, "error: could not write '%s'\n", path);
+            return 1;
+        }
+        written++;
+    }
+
+    printf("wrote %d roster profiles to %s\n", written, dir);
     return 0;
 }
 

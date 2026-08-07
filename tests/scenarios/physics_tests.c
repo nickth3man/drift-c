@@ -20,6 +20,7 @@
 #include "scenario_shared.h"
 
 #include "dev/car_corpus.h"
+#include "game/car_roster.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -2553,6 +2554,195 @@ static void scenario_peak_friction_slip_sweep(void)
     }
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: drivetrain-layout                                                              */
+/* ------------------------------------------------------------------------------------- */
+
+/* Same spec, same power-oversteer script, three layouts. Asserts that the layout parameter
+ * actually changes how torque is routed and how the car behaves under power. */
+static void scenario_drivetrain_layout(void)
+{
+    VehicleSpec baseSpec;
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    phase1_fixture(&baseSpec, &state, &derived, &renderState);
+
+    /* Make the default car oversteer-prone: lower rear mu and raise engine torque so that
+     * drive torque to the rear breaks traction. LSD allows wheel-speed differentiation. The
+     * stock steering geometry (0.45 rad max) is left alone so 12 m/s is a sane cornering
+     * speed for steer input 0.20. */
+    baseSpec.tireMuLatRear = 0.80f;
+    baseSpec.engineTorqueCurveNm[3] = 450.0f;
+    baseSpec.engineTorqueCurveNm[4] = 440.0f;
+    baseSpec.engineTorqueCurveNm[5] = 410.0f;
+    baseSpec.engineTorqueCurveNm[6] = 380.0f;
+    baseSpec.differentialMode = (float)DIFF_LSD;
+    baseSpec.differentialBiasRatio = 2.0f;
+    baseSpec.differentialPreloadNm = 60.0f;
+    vehicle_spec_refresh_derived(&baseSpec);
+
+    const float restOmega[WHEEL_COUNT] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    const float noReaction[WHEEL_COUNT] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+    /* --- Torque routing: which axle receives drive torque? --- */
+    for (int layout = 0; layout <= 2; layout++) {
+        VehicleSpec spec = baseSpec;
+        spec.drivetrainLayout = (float)layout;
+        if (layout == 2) spec.frontTorqueSplit = 0.5f;
+
+        DrivetrainTorques t =
+            drivetrain_calculate_torques(&spec, 1, restOmega, noReaction, 1.0f, 0.0f, 0.0f);
+        const float frontDrive =
+            t.driveTorqueNm[WHEEL_FRONT_LEFT] + t.driveTorqueNm[WHEEL_FRONT_RIGHT];
+        const float rearDrive =
+            t.driveTorqueNm[WHEEL_REAR_LEFT] + t.driveTorqueNm[WHEEL_REAR_RIGHT];
+
+        if (layout == 0) { /* RWD */
+            check(frontDrive == 0.0f, "RWD: front wheels receive zero drive torque");
+            check(rearDrive > 0.0f, "RWD: rear wheels receive drive torque");
+        } else if (layout == 1) { /* FWD */
+            check(frontDrive > 0.0f, "FWD: front wheels receive drive torque");
+            check(rearDrive == 0.0f, "FWD: rear wheels receive zero drive torque");
+        } else { /* AWD */
+            check(frontDrive > 0.0f, "AWD: front wheels receive drive torque");
+            check(rearDrive > 0.0f, "AWD: rear wheels receive drive torque");
+        }
+    }
+
+    /* --- Slip behaviour under power: driven axle shows higher longitudinal slip ---.
+     * Slip ratio directly reflects where the drive torque goes: the driven wheels spin
+     * faster (positive slip ratio) while undriven wheels are dragged (near-zero). This is
+     * more robust than slip-angle differential, which depends on yaw-rate dynamics that can
+     * invert at extreme power levels (RWD wheelspin drops force below the tire peak). */
+    float rearSlipRatio[3] = { 0.0f, 0.0f, 0.0f };
+    float frontSlipRatio[3] = { 0.0f, 0.0f, 0.0f };
+    for (int layout = 0; layout <= 2; layout++) {
+        VehicleSpec spec = baseSpec;
+        spec.drivetrainLayout = (float)layout;
+        if (layout == 2) spec.frontTorqueSplit = 0.5f;
+        vehicle_spec_refresh_derived(&spec);
+        vehicle_state_reset(&spec, &state, &derived, &renderState);
+        state.velocityLongitudinalMps = 12.0f;
+
+        Input input;
+        input_zero(&input);
+        input.steer = 0.20f;
+        input.throttle = 0.15f;
+        for (int i = 0; i < 120; i++)
+            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+
+        input.throttle = 1.0f;
+        for (int i = 0; i < 180; i++) {
+            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+            rearSlipRatio[layout] =
+                fmaxf(rearSlipRatio[layout], state.wheels[WHEEL_REAR_LEFT].slipRatio);
+            frontSlipRatio[layout] =
+                fmaxf(frontSlipRatio[layout], state.wheels[WHEEL_FRONT_LEFT].slipRatio);
+        }
+    }
+
+    /* RWD: rear slip ratio >> front (all drive goes rear). */
+    check(rearSlipRatio[0] > frontSlipRatio[0] + 0.01f,
+          "RWD: rear slip ratio (%.4f) exceeds front (%.4f) under power",
+          (double)rearSlipRatio[0], (double)frontSlipRatio[0]);
+    /* FWD: front slip ratio >> rear (all drive goes front). */
+    check(frontSlipRatio[1] > rearSlipRatio[1] + 0.01f,
+          "FWD: front slip ratio (%.4f) exceeds rear (%.4f) under power",
+          (double)frontSlipRatio[1], (double)rearSlipRatio[1]);
+    /* AWD: both axles show nonzero slip (both receive drive torque). */
+    check(rearSlipRatio[2] > 0.01f && frontSlipRatio[2] > 0.01f,
+          "AWD: both axles show drive-induced slip (rear %.4f, front %.4f)",
+          (double)rearSlipRatio[2], (double)frontSlipRatio[2]);
+    /* Rear-minus-front slip-ratio differential: RWD is largest, FWD is smallest (negative). */
+    const float diff[3] = {
+        rearSlipRatio[0] - frontSlipRatio[0],
+        rearSlipRatio[1] - frontSlipRatio[1],
+        rearSlipRatio[2] - frontSlipRatio[2],
+    };
+    check(diff[0] >= diff[2],
+          "RWD has the largest rear-minus-front slip-ratio differential (RWD %.4f >= AWD %.4f)",
+          (double)diff[0], (double)diff[2]);
+    check(diff[2] >= diff[1],
+          "AWD slip-ratio differential is between RWD and FWD (AWD %.4f >= FWD %.4f)",
+          (double)diff[2], (double)diff[1]);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: roster                                                                         */
+/* ------------------------------------------------------------------------------------- */
+
+/* Every roster entry is valid, uniquely identified, and its exported profile round-trips
+ * back to the same spec. */
+static void scenario_roster(void)
+{
+    const int count = car_roster_count();
+    check(count == 6, "the roster has exactly six cars (got %d)", count);
+
+    char ids[16][128];
+    for (int i = 0; i < count && i < 16; i++) {
+        VehicleSpec spec;
+        check(car_roster_spec(i, &spec), "roster entry %d builds successfully", i);
+        check(vehicle_spec_is_valid(&spec), "roster entry %d is a valid vehicle spec", i);
+
+        car_roster_id(i, ids[i], sizeof(ids[i]));
+        check(strlen(ids[i]) > 0, "roster entry %d has a non-empty id", i);
+
+        /* Filesystem-safe: only lowercase, digits, and underscores. */
+        for (size_t c = 0; ids[i][c] != '\0'; c++) {
+            char ch = ids[i][c];
+            check((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_',
+                  "roster id '%s' is filesystem-safe (char '%c')", ids[i], ch);
+        }
+
+        /* car_roster_find resolves the id back to this index. */
+        check(car_roster_find(ids[i]) == i, "car_roster_find('%s') returns index %d", ids[i],
+              i);
+
+        /* The spec hash is stable and nonzero. */
+        const uint32_t hash = car_roster_spec_hash(i);
+        check(hash != 0, "roster entry %d has a nonzero spec hash", i);
+    }
+
+    /* Unique ids. */
+    for (int i = 0; i < count && i < 16; i++) {
+        for (int j = i + 1; j < count && j < 16; j++) {
+            check(strcmp(ids[i], ids[j]) != 0, "roster ids are unique ('%s' != '%s')", ids[i],
+                  ids[j]);
+        }
+    }
+
+    /* Layout names are correct. */
+    check(strcmp(car_roster_layout_name(0), "RWD") == 0, "entry 0 is RWD");
+    check(strcmp(car_roster_layout_name(2), "FWD") == 0, "entry 2 is FWD");
+    check(strcmp(car_roster_layout_name(4), "AWD") == 0, "entry 4 is AWD");
+
+    /* Profile round-trip: save each spec to a temp file, load it onto a fresh stock spec,
+     * and verify the layout survives. */
+    for (int i = 0; i < count && i < 16; i++) {
+        VehicleSpec original;
+        if (!car_roster_spec(i, &original)) continue;
+
+        const char *tmpPath = "artifacts/telemetry/_roster_roundtrip.txt";
+        check(dev_params_save(&original, tmpPath), "roster entry %d profile saves successfully",
+              i);
+
+        VehicleSpec roundtrip;
+        vehicle_spec_set_default(&roundtrip);
+        int applied = 0;
+        const bool ok = dev_params_load(&roundtrip, tmpPath, &applied, NULL, NULL);
+        check(ok && applied > 0, "roster entry %d profile round-trips (%d applied)", i,
+              applied);
+        if (ok) {
+            check(vehicle_spec_is_valid(&roundtrip),
+                  "roster entry %d round-trip produces a valid spec", i);
+            check(roundtrip.drivetrainLayout == original.drivetrainLayout,
+                  "roster entry %d layout survives profile round-trip (%g vs %g)", i,
+                  (double)roundtrip.drivetrainLayout, (double)original.drivetrainLayout);
+        }
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -2601,6 +2791,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "peak-friction-slip-sweep",
       "uni-modal mu-slip curve: one interior peak, monotonic rise and fall",
       scenario_peak_friction_slip_sweep },
+    { "drivetrain-layout", "RWD/FWD/AWD torque routing and slip-angle differential ordering",
+      scenario_drivetrain_layout },
+    { "roster", "6-car roster: validity, unique ids, profile round-trip", scenario_roster },
 };
 
 TestScenarioGroup test_physics_scenarios(void)

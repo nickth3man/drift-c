@@ -17,5 +17,7 @@ int test_measure_sweep(const char *key);
 int test_dump_corpus_metrics(const char *path);
 int test_dump_corpus_cards(const char *dir);
 int test_dump_corpus_sheet(const char *dir);
+int test_list_cars(void);
+int test_generate_roster(const char *dir);
 
 #endif /* DRIFTY_TEST_COMMANDS_H */

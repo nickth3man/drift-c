@@ -10,7 +10,7 @@
  * WHY C AND NOT FILES, the same reason as car_corpus.h: the roster is the source of truth for
  * the suite, so it has to be reachable with no file I/O, no working-directory assumption, and
  * no directory enumeration from inside the hot-reloadable module. `drifty_tests
- * --generate-roster` exports each spec to data/vehicles/roster/*.txt in the existing profile
+ * --generate-roster` exports each spec to data/vehicles/roster/ as .txt files in the existing
  * format for humans to read and diff, and the `roster` scenario asserts the export round-trips
  * so the files cannot rot away from the code.
  *

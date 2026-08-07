@@ -959,9 +959,15 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         }
         state->wheels[i].angularVelocityRadS = nextOmegaRadS;
     }
-    /* Locked-axle enforcement: only for LOCKED mode. OPEN and LSD let rear wheels
-     * rotate independently, so no equalization is performed. */
-    if (diffMode == DIFF_LOCKED) {
+    /* Locked-axle enforcement: only for LOCKED mode, applied to each DRIVEN axle.
+     * OPEN and LSD let wheels rotate independently, so no equalization is performed. */
+    const float frontShare = drivetrain_front_torque_share(spec);
+    if (diffMode == DIFF_LOCKED && frontShare > 0.0f) {
+        state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS =
+            state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS;
+        state->wheels[WHEEL_FRONT_RIGHT].locked = state->wheels[WHEEL_FRONT_LEFT].locked;
+    }
+    if (diffMode == DIFF_LOCKED && frontShare < 1.0f) {
         state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS =
             state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
         state->wheels[WHEEL_REAR_RIGHT].locked = state->wheels[WHEEL_REAR_LEFT].locked;
@@ -969,17 +975,34 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
     if (diffMode == DIFF_LOCKED && torques.totalGearRatio != 0.0f) {
         const float redlineWheelOmegaRadS =
             spec->engineRedlineRpm * DRIFTY_TWO_PI / (60.0f * fabsf(torques.totalGearRatio));
-        const float rearOmega = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
-        const float omegaSign = (rearOmega > 0.0f) ? 1.0f : (rearOmega < 0.0f) ? -1.0f : 0.0f;
-        const float limitedRearOmega =
-            omegaSign * fminf(fabsf(rearOmega), redlineWheelOmegaRadS);
-        state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS = limitedRearOmega;
-        state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS = limitedRearOmega;
+        if (frontShare > 0.0f) {
+            const float frontOmega = state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS;
+            const float omegaSign = (frontOmega > 0.0f)   ? 1.0f
+                                    : (frontOmega < 0.0f) ? -1.0f
+                                                          : 0.0f;
+            const float limitedFrontOmega =
+                omegaSign * fminf(fabsf(frontOmega), redlineWheelOmegaRadS);
+            state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS = limitedFrontOmega;
+            state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS = limitedFrontOmega;
+        }
+        if (frontShare < 1.0f) {
+            const float rearOmega = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
+            const float omegaSign = (rearOmega > 0.0f)   ? 1.0f
+                                    : (rearOmega < 0.0f) ? -1.0f
+                                                         : 0.0f;
+            const float limitedRearOmega =
+                omegaSign * fminf(fabsf(rearOmega), redlineWheelOmegaRadS);
+            state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS = limitedRearOmega;
+            state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS = limitedRearOmega;
+        }
     }
-    state->engineRpm =
-        drivetrain_engine_rpm(spec, state->selectedGear,
-                              0.5f * (state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
-                                      state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS));
+    {
+        float postOmega[WHEEL_COUNT];
+        for (int i = 0; i < WHEEL_COUNT; i++)
+            postOmega[i] = state->wheels[i].angularVelocityRadS;
+        state->engineRpm = drivetrain_engine_rpm(
+            spec, state->selectedGear, drivetrain_driven_mean_omega(postOmega, frontShare));
+    }
 
     /* Body acceleration is force divided by mass. Do not reconstruct it from the integrated
      * derivative: dvx/dt also contains the rotating-frame transport term r*vy, and using the
