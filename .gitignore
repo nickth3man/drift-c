@@ -40,6 +40,8 @@
 # Legacy roots, superseded by artifacts/telemetry and build/packages.
 /telemetry/
 /dist/
+/recording_output/
+/debug/record/logs/
 
 # Reviewed, tracked, non-code inputs live under data/. The Physics Lab also SAVES named
 # profiles into data/vehicles/, so scratch output is ignored there while the reviewed

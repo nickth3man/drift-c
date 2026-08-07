@@ -118,6 +118,10 @@ typedef struct {
     float paramScrollY; /* raygui scroll offset for the parameter panel */
     int galleryPage;    /* bounded corpus gallery page (Phase 5 capture) */
     int labTierFilter;  /* DevParamTier; hide deeper tiers in the Lab */
+    /* Pin the world camera zoom instead of letting the per-frame follow logic choose it.
+     * 0 means "not pinned". A whole-track framing is what makes an automated recording useful
+     * for diagnosing where a car went, which a car-following camera cannot show. */
+    float cameraZoomOverride;
 
     /* ------------------------------------------------------ time control (read by main.c) -- */
     bool paused;

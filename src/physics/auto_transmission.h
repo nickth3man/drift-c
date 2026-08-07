@@ -13,6 +13,7 @@ typedef enum { AUTO_DRIVE = 0, AUTO_NEUTRAL = 1, AUTO_REVERSE = 2 } AutoDriveSta
 
 typedef struct {
     bool enabled;
+    bool forwardOnly;
     AutoDriveState driveState;
     float neutralTimer;
 } AutoTransmission;

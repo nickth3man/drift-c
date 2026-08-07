@@ -163,8 +163,12 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     game->camera.target = units_world_to_render_px(draw.positionM, game->renderPixelsPerMeter);
 
     /* Camera drift zoom: zoom out during a drift proportional to body sideslip.
-     * Smoothed against render delta time and independent of physics determinism. */
-    {
+     * Smoothed against render delta time and independent of physics determinism.
+     * A pinned zoom wins outright: a diagnostic recording wants a stable framing, and a
+     * zoom that breathes with sideslip makes frame-to-frame comparison harder to read. */
+    if (game->dev.cameraZoomOverride > 0.0f) {
+        game->camera.zoom = game->dev.cameraZoomOverride;
+    } else {
         const float driftIntensity =
             clampf(fabsf(game->derived.bodySideslipRad) / DRIFT_ZOOM_REF_RAD, 0.0f, 1.0f);
         float targetZoom = CAMERA_BASE_ZOOM - driftIntensity * CAMERA_ZOOM_RANGE;

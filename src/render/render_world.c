@@ -131,9 +131,6 @@ void render_world_draw_track(const Track *track, float ppm)
     /* ---- Original stadium oval rendering (below) ---- */
 
     const int n = track->count;
-    /* All current nodes share the same half-width; sample the first. */
-    const float hwM = track->nodes[0].halfWidthM;
-    const float ribbonThicknessPx = 2.0f * hwM * ppm;
 
     /* --- grass surround (drawn first, behind everything) --- */
     {
@@ -162,15 +159,22 @@ void render_world_draw_track(const Track *track, float ppm)
                       (Color){ 76, 117, 67, 255 });
     }
 
-    /* --- asphalt ribbon (thick filled centreline) --- */
+    /* --- asphalt ribbon (thick filled centreline) ---
+     * Width is per segment: the chicane is deliberately narrower than the straights, and a
+     * single sampled half-width would draw it at the wrong size. */
     for (int i = 0; i < n; i++) {
         const int j = (i + 1) % n;
+        const float segHalfWidthM =
+            0.5f * (track->nodes[i].halfWidthM + track->nodes[j].halfWidthM);
         const Vector2 aPx = units_world_to_render_px(track->nodes[i].centerM, ppm);
         const Vector2 bPx = units_world_to_render_px(track->nodes[j].centerM, ppm);
-        DrawLineEx(aPx, bPx, ribbonThicknessPx, (Color){ 40, 40, 45, 255 });
+        DrawLineEx(aPx, bPx, 2.0f * segHalfWidthM * ppm, (Color){ 40, 40, 45, 255 });
     }
 
-    /* --- track boundaries (two offset polylines) --- */
+    /* --- track limits and barriers (offset polylines) ---
+     * Two distinct edges now exist and the difference matters to a driver: the white line is
+     * where the racing surface ends and grip falls away, the red line is where the wall is.
+     * A node with no runoff band draws them on top of each other, which is the truth. */
     for (int i = 0; i < n; i++) {
         const int j = (i + 1) % n;
         const Vector2 a = track->nodes[i].centerM;
@@ -182,24 +186,56 @@ void render_world_draw_track(const Track *track, float ppm)
         if (len < 1e-6f) continue;
 
         const float invLen = 1.0f / len;
+        /* Perpendicular in world space: (-uy, ux) = left side of forward direction. */
         const float ux = dx * invLen;
         const float uy = dy * invLen;
 
-        /* Perpendicular in world space: (-uy, ux) = left side of forward direction. */
-        const float perpX = -uy * hwM;
-        const float perpY = ux * hwM;
+        const float edgeHalfWidthM =
+            0.5f * (track->nodes[i].halfWidthM + track->nodes[j].halfWidthM);
+        const float barrierHalfWidthM =
+            0.5f * (track_node_barrier_half_width(&track->nodes[i]) +
+                    track_node_barrier_half_width(&track->nodes[j]));
 
-        const Vector2 leftA =
-            units_world_to_render_px((Vector2){ a.x + perpX, a.y + perpY }, ppm);
-        const Vector2 leftB =
-            units_world_to_render_px((Vector2){ b.x + perpX, b.y + perpY }, ppm);
-        const Vector2 rightA =
-            units_world_to_render_px((Vector2){ a.x - perpX, a.y - perpY }, ppm);
-        const Vector2 rightB =
-            units_world_to_render_px((Vector2){ b.x - perpX, b.y - perpY }, ppm);
+        const struct {
+            float offsetM;
+            float thicknessPx;
+            Color color;
+        } edges[2] = {
+            { edgeHalfWidthM, 2.5f, (Color){ 220, 220, 225, 255 } },  /* track limit */
+            { barrierHalfWidthM, 3.0f, (Color){ 190, 70, 70, 255 } }, /* barrier */
+        };
 
-        DrawLineEx(leftA, leftB, 2.5f, (Color){ 220, 220, 225, 255 });
-        DrawLineEx(rightA, rightB, 2.5f, (Color){ 220, 220, 225, 255 });
+        for (int e = 0; e < 2; e++) {
+            const float perpX = -uy * edges[e].offsetM;
+            const float perpY = ux * edges[e].offsetM;
+            const Vector2 leftA =
+                units_world_to_render_px((Vector2){ a.x + perpX, a.y + perpY }, ppm);
+            const Vector2 leftB =
+                units_world_to_render_px((Vector2){ b.x + perpX, b.y + perpY }, ppm);
+            const Vector2 rightA =
+                units_world_to_render_px((Vector2){ a.x - perpX, a.y - perpY }, ppm);
+            const Vector2 rightB =
+                units_world_to_render_px((Vector2){ b.x - perpX, b.y - perpY }, ppm);
+            DrawLineEx(leftA, leftB, edges[e].thicknessPx, edges[e].color);
+            DrawLineEx(rightA, rightB, edges[e].thicknessPx, edges[e].color);
+        }
+    }
+
+    /* --- checkpoint gates --- * The next required gate is highlighted, the rest are dim, so a
+     * recording shows at a glance where the car was supposed to go next. */
+    for (int i = 0; i < track->checkpointCount; i++) {
+        const Checkpoint *c = &track->checkpoints[i];
+        const Vector2 perp = { -c->forwardUnit.y * c->halfWidthM,
+                               c->forwardUnit.x * c->halfWidthM };
+        const Vector2 aPx = units_world_to_render_px(
+            (Vector2){ c->centerM.x + perp.x, c->centerM.y + perp.y }, ppm);
+        const Vector2 bPx = units_world_to_render_px(
+            (Vector2){ c->centerM.x - perp.x, c->centerM.y - perp.y }, ppm);
+        const bool isNext = (i == track->nextCheckpoint);
+        const bool isStartFinish = (i == 0);
+        Color color = isNext ? (Color){ 250, 210, 70, 220 } : (Color){ 120, 160, 200, 110 };
+        if (isStartFinish && !isNext) color = (Color){ 230, 230, 235, 160 };
+        DrawLineEx(aPx, bPx, isNext ? 3.0f : 2.0f, color);
     }
 
     /* --- centreline hint (faint guide) --- */

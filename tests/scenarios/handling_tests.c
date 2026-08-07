@@ -82,6 +82,8 @@ typedef struct {
     float frontSlipRad, rearSlipRad, frontSlipRatio, rearSlipRatio;
     float frontUsage, rearUsage, maxUsage;
     float yawTorqueNm, rearOmegaRadS;
+    int selectedGear;
+    int frontLocked, rearLocked;
 } ScriptedSample;
 
 static ScriptedSample g_samples[SCRIPTED_SAMPLE_CAPACITY];
@@ -100,6 +102,11 @@ static void record_sample(const Game *game, int tick)
     s->yawRateRadS = game->vehicle.yawRateRadS;
     s->sideslipRad = game->derived.bodySideslipRad;
     s->steerRad = game->vehicle.frontRoadWheelAngleRad;
+    s->frontLocked = game->vehicle.wheels[WHEEL_FRONT_LEFT].locked ||
+                     game->vehicle.wheels[WHEEL_FRONT_RIGHT].locked;
+    s->rearLocked = game->vehicle.wheels[WHEEL_REAR_LEFT].locked ||
+                    game->vehicle.wheels[WHEEL_REAR_RIGHT].locked;
+    s->selectedGear = game->vehicle.selectedGear;
     s->throttle = game->dev.appliedInput.throttle;
     s->brake = game->dev.appliedInput.brake;
     s->handbrake = game->dev.appliedInput.handbrake;
@@ -142,6 +149,12 @@ void test_handling_cleanup(void)
     g_scriptedGame = NULL;
 }
 
+static bool scripted_scenario_uses_auto_transmission(int index)
+{
+    const int researchStart = dev_scenario_find("sine-steer");
+    return researchStart >= 0 && index >= researchStart;
+}
+
 static void run_scripted_scenario(const char *name)
 {
     const int index = dev_scenario_find(name);
@@ -161,8 +174,8 @@ static void run_scripted_scenario(const char *name)
     Game *game = alloc_game();
     g_scriptedGame = game;
     game_init(game);
-    /* The scripted pedal timeline assumes manual control; the driver aid would rewrite it. */
-    game->autoTrans.enabled = false;
+    game->autoTrans.enabled = scripted_scenario_uses_auto_transmission(index);
+    game->autoTrans.forwardOnly = scripted_scenario_uses_auto_transmission(index);
     game->dev.scenario = index;
     game->dev.scenarioRunning = true;
     game->dev.scenarioStartTick = game->sim.tick;
@@ -218,7 +231,8 @@ static void run_scripted_scenario(const char *name)
      * regression workflow depends on. */
     Game *repeat = alloc_game();
     game_init(repeat);
-    repeat->autoTrans.enabled = false;
+    repeat->autoTrans.enabled = scripted_scenario_uses_auto_transmission(index);
+    repeat->autoTrans.forwardOnly = scripted_scenario_uses_auto_transmission(index);
     repeat->dev.scenario = index;
     repeat->dev.scenarioRunning = true;
     repeat->dev.scenarioStartTick = repeat->sim.tick;
@@ -1166,6 +1180,11 @@ static void scenario_per_surface_asymmetry(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    TelemetryWriter writer;
+    const bool opened =
+        telemetry_ensure_dir(TELEMETRY_DIR) &&
+        telemetry_open(&writer, TELEMETRY_DIR "/scenario_surface-asymmetry.csv");
+    check(opened, "surface asymmetry telemetry writer opened");
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
     track_free(&game->track);
@@ -1173,7 +1192,13 @@ static void scenario_per_surface_asymmetry(void)
     /* Cruise straight with no steer — confirm initial symmetry. */
     set_vehicle_rolling_speed(game, 12.0f);
     game->input.throttle = 0.20f;
-    for (int i = 0; i < 60; i++) game_fixed_update(game, FIXED_DT_S);
+    for (int i = 0; i < 60; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (opened && (i + 1) % 12 == 0) {
+            TelemetryRow row = test_telemetry_row_from_game(game, 1);
+            (void)telemetry_write_row(&writer, &row);
+        }
+    }
 
     const float yawBefore = fabsf(game->derived.totalYawTorqueNm);
     check(yawBefore < 5.0f, "straight driving produces near-zero yaw torque (%.2f N·m)",
@@ -1182,7 +1207,13 @@ static void scenario_per_surface_asymmetry(void)
     /* Place the rear-left wheel on grass. Other three stay asphalt. */
     game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId = SURFACE_GRASS;
     game->input.throttle = 0.40f;
-    for (int i = 0; i < 60; i++) game_fixed_update(game, FIXED_DT_S);
+    for (int i = 0; i < 60; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (opened && (i + 1) % 12 == 0) {
+            TelemetryRow row = test_telemetry_row_from_game(game, 1);
+            (void)telemetry_write_row(&writer, &row);
+        }
+    }
 
     const float yawGrass = game->derived.totalYawTorqueNm;
 
@@ -1198,7 +1229,7 @@ static void scenario_per_surface_asymmetry(void)
           "asymmetric rear grip produces a meaningful yaw torque "
           "(%.2f N·m)",
           (double)fabsf(yawGrass));
-
+    if (opened) check(telemetry_close(&writer), "surface asymmetry telemetry closed cleanly");
     free(game);
 }
 
@@ -2543,6 +2574,175 @@ static void scenario_figure_eight_drift_transition(void)
     free(game);
 }
 
+/*
+ * Research-derived maneuver family. The control shapes follow the maneuver classes discussed
+ * in arXiv:2308.06742 (double-lane change and friction-circle limits), arXiv:2203.15166
+ * (emergency obstacle avoidance under low friction), arXiv:2205.15178 (maneuver selection in
+ * low adhesion), and arXiv:2108.02230 (nonlinear road-vehicle maneuver coverage). These are
+ * genuine engine-input scripts; the generic checks deliberately assert only finite state,
+ * applied input, and tire-budget safety rather than inventing target handling values.
+ */
+static float research_steering_onset_s(const char *name)
+{
+    if (strcmp(name, "sine-dwell") == 0) return 2.0f;
+    if (strcmp(name, "double-lane-change") == 0 || strcmp(name, "fishhook-recovery") == 0 ||
+        strcmp(name, "emergency-obstacle-left") == 0 ||
+        strcmp(name, "emergency-obstacle-right") == 0 || strcmp(name, "chicane") == 0)
+        return 3.0f;
+    return -1.0f;
+}
+
+static float research_speed_floor(const char *name)
+{
+    if (strcmp(name, "slalom") == 0 || strcmp(name, "figure-eight") == 0) return 0.75f;
+    if (strcmp(name, "double-lane-change") == 0 || strcmp(name, "constant-radius-left") == 0 ||
+        strcmp(name, "constant-radius-right") == 0 || strcmp(name, "steering-ramp") == 0)
+        return 0.65f;
+    return 0.0f;
+}
+
+static void run_research_maneuver(const char *name)
+{
+    run_scripted_scenario(name);
+    check(g_sampleCount >= 100, "%s records a substantial maneuver trace (%d samples)", name,
+          g_sampleCount);
+    if (g_sampleCount < 100) return;
+
+    bool allFinite = true;
+    bool inputWasApplied = false;
+    float peakUsage = 0.0f;
+    float peakSpeed = 0.0f;
+    const float onsetS = research_steering_onset_s(name);
+    float preOnsetSteer = 0.0f;
+    int firstFrontLock = -1;
+    int firstRearLock = -1;
+    for (int i = 0; i < g_sampleCount; i++) {
+        const ScriptedSample *sample = &g_samples[i];
+        if (firstFrontLock < 0 && sample->frontLocked) firstFrontLock = i;
+        if (firstRearLock < 0 && sample->rearLocked) firstRearLock = i;
+        if (!isfinite(sample->speedMps) || !isfinite(sample->yawRateRadS) ||
+            !isfinite(sample->sideslipRad) || !isfinite(sample->maxUsage))
+            allFinite = false;
+        peakUsage = fmaxf(peakUsage, sample->maxUsage);
+        peakSpeed = fmaxf(peakSpeed, sample->speedMps);
+        if (onsetS > 0.0f && sample->timeS < onsetS)
+            preOnsetSteer = fmaxf(preOnsetSteer, fabsf(sample->steerRad));
+        if (fabsf(sample->throttle) > 0.01f || fabsf(sample->brake) > 0.01f ||
+            fabsf(sample->handbrake) > 0.01f || fabsf(sample->steerRad) > 0.01f)
+            inputWasApplied = true;
+    }
+    check(allFinite, "%s keeps speed, yaw, sideslip, and friction finite", name);
+    check(peakUsage <= 1.0f + FRICTION_TOLERANCE,
+          "%s stays within the combined tire-friction budget (peak %.3f)", name,
+          (double)peakUsage);
+    check(inputWasApplied, "%s applies a non-zero driver input", name);
+    if (onsetS > 0.0f)
+        check(preOnsetSteer <= 1e-5f, "%s holds zero road-wheel angle before %.1f s (%.5f rad)",
+              name, (double)onsetS, (double)preOnsetSteer);
+    const float speedFloor = research_speed_floor(name);
+    if (speedFloor > 0.0f)
+        check(g_samples[g_sampleCount - 1].speedMps >= peakSpeed * speedFloor,
+              "%s keeps dynamic speed through its measurement window (%.2f/%.2f m/s)", name,
+              (double)g_samples[g_sampleCount - 1].speedMps, (double)peakSpeed);
+    if (strcmp(name, "fishhook-recovery") == 0)
+        check(peakSpeed >= 8.0f, "%s reaches a useful entry speed (%.2f m/s)", name,
+              (double)peakSpeed);
+    if (strcmp(name, "gear-shift-accel") == 0) {
+        bool shifted = false;
+        for (int i = 1; i < g_sampleCount; i++) {
+            if (g_samples[i].selectedGear != g_samples[i - 1].selectedGear) {
+                shifted = true;
+                break;
+            }
+        }
+        check(shifted, "%s changes automatic gear during acceleration", name);
+    }
+    if (strcmp(name, "brake-step") == 0 || strcmp(name, "brake-turn-left") == 0 ||
+        strcmp(name, "brake-turn-right") == 0 || strcmp(name, "emergency-obstacle-left") == 0 ||
+        strcmp(name, "emergency-obstacle-right") == 0 || strcmp(name, "stop-and-go") == 0)
+        check(firstFrontLock < 0 || firstRearLock < 0 || firstFrontLock <= firstRearLock,
+              "%s keeps the front axle from locking after the rear (%d vs %d)", name,
+              firstFrontLock, firstRearLock);
+}
+
+#define RESEARCH_MANEUVER_WRAPPER(functionName, scenarioName) \
+    static void functionName(void)                            \
+    {                                                         \
+        run_research_maneuver(scenarioName);                  \
+    }
+
+RESEARCH_MANEUVER_WRAPPER(scenario_sine_steer, "sine-steer")
+RESEARCH_MANEUVER_WRAPPER(scenario_sine_dwell, "sine-dwell")
+RESEARCH_MANEUVER_WRAPPER(scenario_j_turn, "j-turn")
+RESEARCH_MANEUVER_WRAPPER(scenario_double_lane_change, "double-lane-change")
+RESEARCH_MANEUVER_WRAPPER(scenario_slalom, "slalom")
+RESEARCH_MANEUVER_WRAPPER(scenario_fishhook_recovery, "fishhook-recovery")
+RESEARCH_MANEUVER_WRAPPER(scenario_emergency_obstacle_left, "emergency-obstacle-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_emergency_obstacle_right, "emergency-obstacle-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_brake_turn_left, "brake-turn-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_brake_turn_right, "brake-turn-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_throttle_step, "throttle-step")
+RESEARCH_MANEUVER_WRAPPER(scenario_brake_step, "brake-step")
+RESEARCH_MANEUVER_WRAPPER(scenario_steering_ramp, "steering-ramp")
+RESEARCH_MANEUVER_WRAPPER(scenario_steering_pulse, "steering-pulse")
+RESEARCH_MANEUVER_WRAPPER(scenario_throttle_pulse, "throttle-pulse")
+RESEARCH_MANEUVER_WRAPPER(scenario_lift_off_left, "lift-off-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_lift_off_right, "lift-off-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_power_on_left, "power-on-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_power_on_right, "power-on-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_trail_brake_left, "trail-brake-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_trail_brake_right, "trail-brake-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_constant_radius_left, "constant-radius-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_constant_radius_right, "constant-radius-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_figure_eight, "figure-eight")
+RESEARCH_MANEUVER_WRAPPER(scenario_chicane, "chicane")
+RESEARCH_MANEUVER_WRAPPER(scenario_low_speed_tight_turn_left, "low-speed-tight-turn-left")
+RESEARCH_MANEUVER_WRAPPER(scenario_low_speed_tight_turn_right, "low-speed-tight-turn-right")
+RESEARCH_MANEUVER_WRAPPER(scenario_stop_and_go, "stop-and-go")
+RESEARCH_MANEUVER_WRAPPER(scenario_gear_shift_accel, "gear-shift-accel")
+RESEARCH_MANEUVER_WRAPPER(scenario_coast_brake_pulse, "coast-brake-pulse")
+
+#undef RESEARCH_MANEUVER_WRAPPER
+
+typedef struct {
+    float finalSpeedMps;
+    float peakSpeedMps;
+    float peakSideslipRad;
+    float peakYawRateRadS;
+} ResearchMirrorMetrics;
+
+static ResearchMirrorMetrics research_mirror_metrics(void)
+{
+    ResearchMirrorMetrics metrics = { 0.0f, 0.0f, 0.0f, 0.0f };
+    if (g_sampleCount <= 0) return metrics;
+    metrics.finalSpeedMps = g_samples[g_sampleCount - 1].speedMps;
+    for (int i = 0; i < g_sampleCount; i++) {
+        metrics.peakSpeedMps = fmaxf(metrics.peakSpeedMps, g_samples[i].speedMps);
+        metrics.peakSideslipRad =
+            fmaxf(metrics.peakSideslipRad, fabsf(g_samples[i].sideslipRad));
+        metrics.peakYawRateRadS =
+            fmaxf(metrics.peakYawRateRadS, fabsf(g_samples[i].yawRateRadS));
+    }
+    return metrics;
+}
+
+static void scenario_research_mirror_symmetry(void)
+{
+    run_scripted_scenario("power-on-left");
+    const ResearchMirrorMetrics left = research_mirror_metrics();
+    run_scripted_scenario("power-on-right");
+    const ResearchMirrorMetrics right = research_mirror_metrics();
+    check(fabsf(left.finalSpeedMps - right.finalSpeedMps) < 0.25f,
+          "power-on mirror final speed matches (%.3f vs %.3f m/s)", (double)left.finalSpeedMps,
+          (double)right.finalSpeedMps);
+    check(fabsf(left.peakSideslipRad - right.peakSideslipRad) < 0.02f,
+          "power-on mirror peak sideslip matches (%.4f vs %.4f rad)",
+          (double)left.peakSideslipRad, (double)right.peakSideslipRad);
+    check(fabsf(left.peakYawRateRadS - right.peakYawRateRadS) < 0.04f,
+          "power-on mirror peak yaw matches (%.4f vs %.4f rad/s)", (double)left.peakYawRateRadS,
+          (double)right.peakYawRateRadS);
+}
+
 static const TestScenario kHandlingScenarios[] = {
     { "accel-load", "acceleration transfers load rearward; capacity follows",
       scenario_accel_load },
@@ -2601,6 +2801,48 @@ static const TestScenario kHandlingScenarios[] = {
     { "figure-eight-drift-transition",
       "steady lobe, countersteer reversal through neutral, mirrored opposite lobe",
       scenario_figure_eight_drift_transition },
+    { "sine-steer", "research: sinusoidal steering sweep", scenario_sine_steer },
+    { "sine-dwell", "research: sine-with-dwell reversal", scenario_sine_dwell },
+    { "j-turn", "research: throttle-lift J-turn", scenario_j_turn },
+    { "double-lane-change", "research: left-right-left evasive lane change",
+      scenario_double_lane_change },
+    { "slalom", "research: alternating steering slalom", scenario_slalom },
+    { "fishhook-recovery", "research: mirrored fishhook recovery", scenario_fishhook_recovery },
+    { "emergency-obstacle-left", "research: left obstacle avoidance under braking",
+      scenario_emergency_obstacle_left },
+    { "emergency-obstacle-right", "research: right obstacle avoidance under braking",
+      scenario_emergency_obstacle_right },
+    { "brake-turn-left", "research: combined left braking and cornering",
+      scenario_brake_turn_left },
+    { "brake-turn-right", "research: combined right braking and cornering",
+      scenario_brake_turn_right },
+    { "throttle-step", "research: mid-corner throttle step", scenario_throttle_step },
+    { "brake-step", "research: mid-corner brake step", scenario_brake_step },
+    { "steering-ramp", "research: linear steering ramp", scenario_steering_ramp },
+    { "steering-pulse", "research: steering pulse and recovery", scenario_steering_pulse },
+    { "throttle-pulse", "research: cornering throttle pulse", scenario_throttle_pulse },
+    { "lift-off-left", "research: left-corner lift-off", scenario_lift_off_left },
+    { "lift-off-right", "research: right-corner lift-off", scenario_lift_off_right },
+    { "power-on-left", "research: left-corner power application", scenario_power_on_left },
+    { "power-on-right", "research: right-corner power application", scenario_power_on_right },
+    { "trail-brake-left", "research: left-corner trail braking", scenario_trail_brake_left },
+    { "trail-brake-right", "research: right-corner trail braking", scenario_trail_brake_right },
+    { "constant-radius-left", "research: settled left constant-radius corner",
+      scenario_constant_radius_left },
+    { "constant-radius-right", "research: settled right constant-radius corner",
+      scenario_constant_radius_right },
+    { "figure-eight", "research: opposite-hand figure eight", scenario_figure_eight },
+    { "chicane", "research: rapid left-right chicane", scenario_chicane },
+    { "low-speed-tight-turn-left", "research: low-speed left full-lock turn",
+      scenario_low_speed_tight_turn_left },
+    { "low-speed-tight-turn-right", "research: low-speed right full-lock turn",
+      scenario_low_speed_tight_turn_right },
+    { "stop-and-go", "research: repeated launch and stop", scenario_stop_and_go },
+    { "gear-shift-accel", "research: acceleration through automatic shifts",
+      scenario_gear_shift_accel },
+    { "coast-brake-pulse", "research: coast and brake pulse", scenario_coast_brake_pulse },
+    { "research-mirror-symmetry", "research: mirrored power-on handling response",
+      scenario_research_mirror_symmetry },
 };
 
 TestScenarioGroup test_handling_scenarios(void)

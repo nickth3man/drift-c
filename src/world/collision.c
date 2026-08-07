@@ -257,30 +257,30 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
             const Vector2 dir = { segDx * invLen, segDy * invLen };
             const Vector2 perp = { -dir.y, dir.x };
 
-            /* Two barriers: left (outside, +perp offset) and right (inside, -perp offset).
-             * Each barrier endpoint uses ITS node's half-width — not a shared midpoint — so
-             * a variable-width segment produces a diverging/converging barrier. */
+            /* Barriers stand at the RUNOFF edge, not the racing-surface edge, so a car can
+             * run wide onto the runoff and lose grip without instantly striking a wall. A
+             * node with no runoff band reports its racing half-width here, which is exactly
+             * where its barrier used to be. */
+            const float hwI = track_node_barrier_half_width(ni);
+            const float hwJ = track_node_barrier_half_width(nj);
             const Vector2 barriers[2][2] = {
-                { /* left */ { ni->centerM.x + perp.x * ni->halfWidthM,
-                               ni->centerM.y + perp.y * ni->halfWidthM },
-                  { nj->centerM.x + perp.x * nj->halfWidthM,
-                    nj->centerM.y + perp.y * nj->halfWidthM } },
-                { /* right */ { ni->centerM.x - perp.x * ni->halfWidthM,
-                                ni->centerM.y - perp.y * ni->halfWidthM },
-                  { nj->centerM.x - perp.x * nj->halfWidthM,
-                    nj->centerM.y - perp.y * nj->halfWidthM } },
+                { /* left */ { ni->centerM.x + perp.x * hwI, ni->centerM.y + perp.y * hwI },
+                  { nj->centerM.x + perp.x * hwJ, nj->centerM.y + perp.y * hwJ } },
+                { /* right */ { ni->centerM.x - perp.x * hwI, ni->centerM.y - perp.y * hwI },
+                  { nj->centerM.x - perp.x * hwJ, nj->centerM.y - perp.y * hwJ } },
             };
-            /* Push normal: left barrier pushes right (-90°), right pushes left (+90°). */
-            const Vector2 pushNs[2] = { { dir.y, -dir.x }, { -dir.y, dir.x } };
+            /* Push normal: for ribbon tracks, left barrier pushes right ({dir.y, -dir.x}),
+             * right barrier pushes left ({-dir.y, dir.x}).
+             * For parking lot perimeter, BOTH barriers push INWARD (perp). */
+            const Vector2 pushNs[2] = { track->isParkingLot ? perp : (Vector2){ dir.y, -dir.x },
+                                        track->isParkingLot ? perp
+                                                            : (Vector2){ -dir.y, dir.x } };
 
             for (int barrier = 0; barrier < 2; barrier++) {
                 const Vector2 bA = barriers[barrier][0];
                 const Vector2 bB = barriers[barrier][1];
                 const Vector2 pushN = pushNs[barrier];
 
-                /* Check front circle, then rear circle. After any resolution the CG has
-                 * moved and velocity changed, so recompute the circle position from the
-                 * updated pos and rely on the updated vCgWorld. */
                 for (int circle = 0; circle < 2; circle++) {
                     const Vector2 bodyPt = (circle == 0) ? bFront : bRear;
                     const Vector2 circleWorld = world_from_body(bodyPt, pos, hdg);
@@ -294,8 +294,6 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
                                                    contactPt, distSq, pushN, radiusM, rHalf,
                                                    muC, &vCgWorld, crashLockoutTimerS)) {
                             contacts++;
-                            /* Stale-data guard: the push moved the CG, so subsequent
-                             * circles must be evaluated from the corrected position. */
                             pos = state->positionM;
                         }
                     }

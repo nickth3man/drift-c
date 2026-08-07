@@ -96,8 +96,13 @@ TelemetryRow test_telemetry_row_from_game(const Game *game, int substepCount)
 
     /* dev.appliedInput is the input the fixed update actually used, which is the scripted
      * timeline while a scenario runs rather than whatever game->input holds. */
+    row.steeringInput = game->dev.appliedInput.steer;
     row.throttleInput = game->dev.appliedInput.throttle;
     row.brakeInput = game->dev.appliedInput.brake;
     row.handbrakeInput = game->dev.appliedInput.handbrake;
+    row.surfaceFrontLeft = game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId;
+    row.surfaceFrontRight = game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId;
+    row.surfaceRearLeft = game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId;
+    row.surfaceRearRight = game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId;
     return row;
 }

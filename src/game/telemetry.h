@@ -88,10 +88,18 @@ typedef struct {
     float rollingResistanceYN;
 
     /* The driver's held controls, so a report can show what was asked for beside what the
-     * car did. Steering already appears as the rate-limited road-wheel angle. */
+     * car did. */
+    float steeringInput;
     float throttleInput;
     float brakeInput;
     float handbrakeInput;
+
+    /* Per-wheel surface identity, appended so existing columns remain stable. */
+
+    int surfaceFrontLeft;
+    int surfaceFrontRight;
+    int surfaceRearLeft;
+    int surfaceRearRight;
 } TelemetryRow;
 
 typedef struct {

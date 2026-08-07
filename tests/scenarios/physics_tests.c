@@ -501,15 +501,19 @@ static void scenario_drivetrain(void)
     check_near(drivetrain_engine_rpm(&spec, 1, 20.0f),
                clampf(20.0f * firstRatio * 60.0f / DRIFTY_TWO_PI, spec.engineIdleRpm,
                       spec.engineRedlineRpm),
-               1e-4, "engine RPM derives from rear wheel speed and gearing");
+               1e-4, "engine RPM derives from driven wheel speed and gearing");
+
+    /* All four wheels are handed to the drivetrain; the layout decides which it drives. */
+    const float restOmega[WHEEL_COUNT] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    const float noReaction[WHEEL_COUNT] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
     DrivetrainTorques neutral =
-        drivetrain_calculate_torques(&spec, 0, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        drivetrain_calculate_torques(&spec, 0, restOmega, noReaction, 1.0f, 0.0f, 0.0f);
     check_near(neutral.drivelineTorqueNm, 0.0, 0.0, "neutral transmits no drive torque");
     DrivetrainTorques forward =
-        drivetrain_calculate_torques(&spec, 1, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        drivetrain_calculate_torques(&spec, 1, restOmega, noReaction, 1.0f, 0.0f, 0.0f);
     DrivetrainTorques reverse =
-        drivetrain_calculate_torques(&spec, -1, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        drivetrain_calculate_torques(&spec, -1, restOmega, noReaction, 1.0f, 0.0f, 0.0f);
     check(forward.drivelineTorqueNm > 0.0f && reverse.drivelineTorqueNm < 0.0f,
           "forward and reverse produce opposite driveline torque");
     check(forward.driveTorqueNm[WHEEL_FRONT_LEFT] == 0.0f &&
@@ -519,13 +523,14 @@ static void scenario_drivetrain(void)
                0.0, "rear wheels receive equal drive torque");
     VehicleSpec halfEfficiency = spec;
     halfEfficiency.drivetrainEfficiency *= 0.5f;
-    DrivetrainTorques half = drivetrain_calculate_torques(&halfEfficiency, 1, 0.0f, 0.0f, 0.0f,
-                                                          0.0f, 1.0f, 0.0f, 0.0f);
+    DrivetrainTorques half = drivetrain_calculate_torques(&halfEfficiency, 1, restOmega,
+                                                          noReaction, 1.0f, 0.0f, 0.0f);
     check_near(half.drivelineTorqueNm, forward.drivelineTorqueNm * 0.5f, 1e-4,
                "drivetrain efficiency scales output torque");
 
+    const float rollingOmega[WHEEL_COUNT] = { 10.0f, 10.0f, 10.0f, 10.0f };
     DrivetrainTorques braking =
-        drivetrain_calculate_torques(&spec, 1, 10.0f, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+        drivetrain_calculate_torques(&spec, 1, rollingOmega, noReaction, 0.0f, 1.0f, 1.0f);
     const float frontBrake = braking.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
                              braking.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];
     const float rearBrake = braking.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] +
@@ -1302,10 +1307,15 @@ static void scenario_launch_stop(void)
           "braking settles at zero speed");
     check(minimumSlip < -0.1f, "service braking creates negative wheel slip (min %.3f)",
           (double)minimumSlip);
-    check_near(game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
-                   game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT],
-               game->spec.maxBrakeTorqueNm * game->spec.brakeBiasFront, 1e-4,
-               "service-brake front torque follows configured bias");
+    const float actualFrontBrake = game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
+                                   game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];
+    const float actualTotalBrake = actualFrontBrake +
+                                   game->derived.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] +
+                                   game->derived.serviceBrakeTorqueNm[WHEEL_REAR_RIGHT];
+    check(actualFrontBrake >= actualTotalBrake * game->spec.brakeBiasFront - 1e-4f &&
+              actualFrontBrake <= actualTotalBrake * 0.85f + 1e-4f,
+          "service-brake front torque reserves forward load capacity (front %.1f of %.1f Nm)",
+          (double)actualFrontBrake, (double)actualTotalBrake);
     printf("    braking: %.3f -> %.6f m/s, min slip %.3f, no reversal\n", (double)launchSpeed,
            (double)game->derived.speedMps, (double)minimumSlip);
     check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),

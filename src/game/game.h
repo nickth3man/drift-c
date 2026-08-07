@@ -40,6 +40,23 @@ typedef enum {
     STATE_COUNT
 } GameStateId;
 
+typedef enum {
+    GAME_TRACK_KEEP = 0, /* leave whatever game_init() loaded */
+    GAME_TRACK_PARKING_LOT,
+    GAME_TRACK_CHICANE,
+    GAME_TRACK_COUNT
+} GameTrackId;
+
+/*
+ * What a bounded run should be set up with. Plain value data passed by pointer from the
+ * platform layer, which cannot reach track or vehicle code directly — those live in the
+ * reloadable module. Nothing here is retained: game_configure_run() reads it and returns.
+ */
+struct GameRunConfig {
+    GameTrackId track;
+    float cameraZoomOverride; /* 0 leaves the follow camera's own choice alone */
+};
+
 typedef struct {
     uint64_t tick;
     uint32_t resetCount;
@@ -58,6 +75,10 @@ struct Game {
     VehicleDerived derived;
     VehicleRenderState renderState;
     Track track;
+    /* What the checkpoint test saw on the most recent fixed tick. Plain value data, rewritten
+     * every tick, and excluded from the state checksum because it is a report about the
+     * simulation rather than part of it. */
+    TrackCheckpointEvent lastCheckpointEvent;
     ParticlePool particles;
     Camera2D camera;
 
@@ -120,5 +141,10 @@ GAME_API void game_reset_sim(Game *game);
  * same maneuver. Does not re-initialise track, audio, or visual subsystems —
  * callers that need those must handle them separately. */
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec);
+
+/* Place the car at the loaded track's start/finish line, facing the way the circuit goes, and
+ * put lap progress back to the beginning of an out-lap. Returns false when no track with
+ * gates is loaded, in which case nothing is modified. */
+GAME_API bool game_spawn_on_track(Game *game);
 
 #endif /* DRIFTY_GAME_H */

@@ -215,7 +215,7 @@ void render_hud_draw_arcade(const Game *game)
                  (int)panel.y + 16, 22, COL_TEXT);
 
         const char *cpText =
-            TextFormat("CP %d/%d", game->track.nextCheckpoint, game->track.count);
+            TextFormat("CP %d/%d", game->track.nextCheckpoint, game->track.checkpointCount);
         DrawText(cpText, (int)(panel.x + panel.width) - 16 - MeasureText(cpText, 18),
                  (int)panel.y + 18, 18, COL_TEXT_DIM);
     }
@@ -426,7 +426,7 @@ void render_hud_draw_diagnostics(const Game *game, float alpha)
                             (int)(game->track.lapTimerS / 60.0f),
                             (double)(game->track.lapTimerS -
                                      (float)(int)(game->track.lapTimerS / 60.0f) * 60.0f),
-                            game->track.nextCheckpoint, game->track.count),
+                            game->track.nextCheckpoint, game->track.checkpointCount),
                  label);
         hud_line(14, &y,
                  TextFormat("Score: %.0f  Best: %.0f  Combo: x%.1f  Drift: %.2fs%s",

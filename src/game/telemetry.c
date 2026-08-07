@@ -28,7 +28,8 @@
     "load_transfer_n,previous_long_accel_mps2,filtered_long_accel_mps2,"                      \
     "solved_long_accel_mps2,lateral_accel_mps2,aero_drag_n,aero_drag_x_n,aero_drag_y_n,"      \
     "rolling_resistance_n,rolling_resistance_x_n,rolling_resistance_y_n,"                     \
-    "throttle_input,brake_input,handbrake_input"
+    "steering_input,throttle_input,brake_input,handbrake_input,"                              \
+    "surface_front_left,surface_front_right,surface_rear_left,surface_rear_right"
 
 const char *telemetry_header(void)
 {
@@ -118,8 +119,8 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         "%.6f,%.6f,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,"
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%" PRIu32 ","
-        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
-        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%"
+        ".6f,%.6f,%d,%d,%d,%d\n",
         row->tick, row->timeS, (double)row->positionXM, (double)row->positionYM,
         (double)row->headingRad, (double)row->velocityLongitudinalMps,
         (double)row->velocityLateralMps, (double)row->speedMps, (double)row->yawRateRadS,
@@ -143,7 +144,9 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         (double)row->solvedLongAccelMps2, (double)row->lateralAccelMps2, (double)row->aeroDragN,
         (double)row->aeroDragXN, (double)row->aeroDragYN, (double)row->rollingResistanceN,
         (double)row->rollingResistanceXN, (double)row->rollingResistanceYN,
-        (double)row->throttleInput, (double)row->brakeInput, (double)row->handbrakeInput);
+        (double)row->steeringInput, (double)row->throttleInput, (double)row->brakeInput,
+        (double)row->handbrakeInput, row->surfaceFrontLeft, row->surfaceFrontRight,
+        row->surfaceRearLeft, row->surfaceRearRight);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;

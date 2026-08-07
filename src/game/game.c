@@ -122,6 +122,53 @@ GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
     vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
 }
 
+GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
+{
+    if (game == NULL || config == NULL) return false;
+
+    switch (config->track) {
+        case GAME_TRACK_PARKING_LOT: track_init(&game->track); break;
+        case GAME_TRACK_CHICANE: track_load_chicane(&game->track); break;
+        case GAME_TRACK_KEEP: break;
+        default: return false;
+    }
+
+    game->dev.cameraZoomOverride = config->cameraZoomOverride;
+
+    if (config->track != GAME_TRACK_KEEP) return game_spawn_on_track(game);
+    return true;
+}
+
+GAME_API bool game_spawn_on_track(Game *game)
+{
+    if (game == NULL) return false;
+
+    Vector2 startM = { 0.0f, 0.0f };
+    float headingRad = 0.0f;
+    if (!track_start_pose(&game->track, &startM, &headingRad)) return false;
+
+    /* Reset first, then place: vehicle_state_reset() puts the car at the world origin, so
+     * doing it the other way round would throw the pose away. */
+    vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
+    game->vehicle.positionM = startM;
+    game->vehicle.headingRad = headingRad;
+
+    /* Render history must agree with the new pose or the first frame interpolates from the
+     * origin, and the first checkpoint test sweeps a segment spanning the whole track. */
+    game->renderState.prevPositionM = startM;
+    game->renderState.currPositionM = startM;
+    game->renderState.prevHeadingRad = headingRad;
+    game->renderState.currHeadingRad = headingRad;
+
+    track_reset_progress(&game->track);
+    memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
+    game->lastCheckpointEvent.index = -1;
+
+    game->autoTrans.driveState = AUTO_DRIVE;
+    game->autoTrans.neutralTimer = 0.0f;
+    return true;
+}
+
 /* -------------------------------------------------------------------------------------
  * High-score persistence (Phase 6). Uses standard C file I/O so it works in both the
  * headless test executable and the full game. The directory is created if it does not
@@ -277,8 +324,8 @@ GAME_API void game_init(Game *game)
     vehicle_spec_set_default(&game->spec);
     game_reset_sim(game);
     game->autoTrans.enabled = true;
+    game->autoTrans.forwardOnly = false;
     game->autoTrans.driveState = AUTO_DRIVE;
-    game->autoTrans.neutralTimer = 0.0f;
 #if defined(DRIFTY_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
@@ -396,9 +443,17 @@ GAME_API void game_fixed_update(Game *game, float dt)
                                  &tickInput, dt);
 
         DRIFTY_ZONE_BEGIN(physics, "Physics");
-        /* Save start-of-tick position for checkpoint crossing (renderState->prev* was
-         * already set by physics_fixed_update before integration). */
-        const Vector2 startPosM = game->renderState.prevPositionM;
+        /* Start-of-tick position, for the checkpoint crossing test below.
+         *
+         * It has to be currPositionM read HERE, before the physics step. physics_fixed_update
+         * shifts curr into prev on entry and writes the new position into curr on exit, so
+         * reading prevPositionM at this point yields the position two ticks ago — and a
+         * two-tick sweep overlaps the next tick's sweep, which makes every gate crossing get
+         * detected twice. That was invisible while only the expected gate was tested (the
+         * second detection simply failed to advance); testing all gates reports it as an
+         * out-of-order crossing, which is exactly the false accusation a lap validator must
+         * not make. */
+        const Vector2 startPosM = game->renderState.currPositionM;
 
         /* Per-wheel surface query: each contact point tests the track independently so the
          * car can straddle two surfaces. This lives in game.c, not physics.c, keeping the
@@ -418,10 +473,16 @@ GAME_API void game_fixed_update(Game *game, float dt)
                              &tickInput, dt);
         DRIFTY_ZONE_END(physics);
 
-        /* Checkpoint crossing: check if the car crossed the next gate this tick. */
+        /* Checkpoint crossing: check whether the car passed a gate this tick. The event is
+         * kept for the tick so telemetry and the validation runner can record which gate was
+         * taken, and whether it was taken out of order. */
         if (game->track.nodes != NULL && game->track.count > 0) {
-            track_update_checkpoints(&game->track, startPosM, game->renderState.currPositionM);
+            game->lastCheckpointEvent = track_update_checkpoints(
+                &game->track, startPosM, game->renderState.currPositionM);
             game->track.lapTimerS += dt;
+        } else {
+            memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
+            game->lastCheckpointEvent.index = -1;
         }
 
         /* Crash lockout timer: count down toward zero. */

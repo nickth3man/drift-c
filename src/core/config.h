@@ -56,11 +56,10 @@
  * Deterministic input recording
  * ------------------------------------------------------------------------------------- */
 
-/* Fixed-capacity ring buffer, sized in fixed ticks. 7200 ticks = 60.0 s at 120 Hz.
+/* Fixed-capacity ring buffer, sized in fixed ticks. 14400 ticks = 120.0 s at 120 Hz.
  * Overflow behaviour is a documented ring: the oldest tick is discarded and counted in
  * ReplayBuffer.overwrittenTicks. See src/game/replay.h. */
-#define REPLAY_CAPACITY_TICKS 7200
-
+#define REPLAY_CAPACITY_TICKS 14400
 /* -------------------------------------------------------------------------------------
  * Phase 1/2 vehicle physics (SI units)
  * ------------------------------------------------------------------------------------- */

@@ -523,21 +523,47 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS = rearAngularVelocityRadS;
         state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS = rearAngularVelocityRadS;
     }
+    /* Brake torque follows forward load transfer, never moving rearward from the configured
+     * static bias. This keeps the rear axle from locking first when hard braking unloads it. */
+    const AxleLoads brakeLoads = physics_axle_loads(spec, state->filteredLongAccelMps2);
     const float rearOmegaLeftRadS = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
     const float rearOmegaRightRadS = state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS;
-    const float rearAvgOmegaRadS = 0.5f * (rearOmegaLeftRadS + rearOmegaRightRadS);
-    state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, rearAvgOmegaRadS);
-    /* Tire reaction torques for LSD: the torque the road exerts on each rear wheel
-     * (Fx * R). On the first step after reset these are 0, which conservatively
-     * limits the LSD to its preload only. */
-    const float rearTireReactionLeftNm = state->wheels[WHEEL_REAR_LEFT].forceLongitudinalN *
-                                         vehicle_wheel_radius_m(spec, WHEEL_REAR_LEFT);
-    const float rearTireReactionRightNm = state->wheels[WHEEL_REAR_RIGHT].forceLongitudinalN *
-                                          vehicle_wheel_radius_m(spec, WHEEL_REAR_RIGHT);
-    const DrivetrainTorques torques = drivetrain_calculate_torques(
-        spec, state->selectedGear, rearOmegaLeftRadS, rearOmegaRightRadS,
-        rearTireReactionLeftNm, rearTireReactionRightNm, input->throttle, input->brake,
-        input->handbrake);
+
+    /* All four wheels are handed to the drivetrain; the layout decides which of them the
+     * driveline is actually connected to. Tire reaction torque is the torque the road exerts
+     * on a wheel (Fx * R) and feeds the LSD grip limit. On the first step after a reset these
+     * are 0, which conservatively limits an LSD to its preload only. */
+    float wheelOmegaRadS[WHEEL_COUNT];
+    float wheelTireReactionNm[WHEEL_COUNT];
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        wheelOmegaRadS[i] = state->wheels[i].angularVelocityRadS;
+        wheelTireReactionNm[i] =
+            state->wheels[i].forceLongitudinalN * vehicle_wheel_radius_m(spec, i);
+    }
+
+    const float drivenOmegaRadS =
+        drivetrain_driven_mean_omega(wheelOmegaRadS, drivetrain_front_torque_share(spec));
+    state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
+
+    DrivetrainTorques torques = drivetrain_calculate_torques(
+        spec, state->selectedGear, wheelOmegaRadS, wheelTireReactionNm, input->throttle,
+        input->brake, input->handbrake);
+    if (input->brake >= 0.60f && brakeLoads.frontN + brakeLoads.rearN > 0.0f) {
+        const float loadBias = brakeLoads.frontN / (brakeLoads.frontN + brakeLoads.rearN);
+        /* Combined braking and cornering consumes rear lateral capacity too. Keep a small
+         * forward reserve above pure longitudinal load sharing so the unloaded rear axle does
+         * not lock first when it is already spending friction on cornering. */
+        const float targetBias = loadBias + 0.15f;
+        const float effectiveBias =
+            clampf(fmaxf(spec->brakeBiasFront, targetBias), spec->brakeBiasFront, 0.85f);
+        const float frontServiceTotalNm = input->brake * spec->maxBrakeTorqueNm * effectiveBias;
+        const float rearServiceTotalNm =
+            input->brake * spec->maxBrakeTorqueNm * (1.0f - effectiveBias);
+        torques.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] = frontServiceTotalNm * 0.5f;
+        torques.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT] = frontServiceTotalNm * 0.5f;
+        torques.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] = rearServiceTotalNm * 0.5f;
+        torques.serviceBrakeTorqueNm[WHEEL_REAR_RIGHT] = rearServiceTotalNm * 0.5f;
+    }
     derived->differentialOmegaRadS[0] = rearOmegaLeftRadS;
     derived->differentialOmegaRadS[1] = rearOmegaRightRadS;
     derived->differentialTorqueNm[0] = torques.driveTorqueNm[WHEEL_REAR_LEFT];
@@ -613,9 +639,9 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
             state->filteredLatAccelMps2, state->prevLatAccelMps2, spec->loadFilterRateHz, dt);
     }
 
+    const AxleLoads loads = physics_axle_loads(spec, state->filteredLongAccelMps2);
     /* --- 8. static and dynamic axle loads ------------------------------------------------ */
 
-    const AxleLoads loads = physics_axle_loads(spec, state->filteredLongAccelMps2);
     derived->staticFrontLoadN = loads.staticFrontN;
     derived->staticRearLoadN = loads.staticRearN;
     derived->unclampedFrontLoadN = loads.unclampedFrontN;

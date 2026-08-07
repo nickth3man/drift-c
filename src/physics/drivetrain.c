@@ -48,37 +48,99 @@ float drivetrain_total_gear_ratio(const VehicleSpec *spec, int selectedGear)
 }
 
 float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
-                            float rearAngularVelocityRadS)
+                            float drivenAngularVelocityRadS)
 {
-    if (spec == NULL || !isfinite(rearAngularVelocityRadS)) return 0.0f;
+    if (spec == NULL || !isfinite(drivenAngularVelocityRadS)) return 0.0f;
     const float totalGear = drivetrain_total_gear_ratio(spec, selectedGear);
     if (totalGear == 0.0f) return spec->engineIdleRpm;
-    const float rpm = fabsf(rearAngularVelocityRadS) * fabsf(totalGear) * 60.0f / DRIFTY_TWO_PI;
+    const float rpm =
+        fabsf(drivenAngularVelocityRadS) * fabsf(totalGear) * 60.0f / DRIFTY_TWO_PI;
     return clampf(rpm, spec->engineIdleRpm, spec->engineRedlineRpm);
 }
 
+float drivetrain_front_torque_share(const VehicleSpec *spec)
+{
+    if (spec == NULL) return 0.0f;
+    switch ((int)spec->drivetrainLayout) {
+        case 1: return 1.0f;                                       /* FWD */
+        case 2: return clampf(spec->frontTorqueSplit, 0.0f, 1.0f); /* AWD */
+        default: return 0.0f;                                      /* RWD */
+    }
+}
+
+float drivetrain_driven_mean_omega(const float omegaRadS[WHEEL_COUNT], float frontShare)
+{
+    if (omegaRadS == NULL) return 0.0f;
+    const float frontMean = 0.5f * (omegaRadS[WHEEL_FRONT_LEFT] + omegaRadS[WHEEL_FRONT_RIGHT]);
+    const float rearMean = 0.5f * (omegaRadS[WHEEL_REAR_LEFT] + omegaRadS[WHEEL_REAR_RIGHT]);
+
+    /* Exact equality rather than a tolerance: these are the endpoints the layout produces
+     * verbatim, and taking the pure-axle branch keeps a RWD or FWD car's engine speed
+     * bit-identical to the single-axle expression it had before AWD existed. */
+    if (frontShare <= 0.0f) return rearMean;
+    if (frontShare >= 1.0f) return frontMean;
+
+    /* AWD: the centre differential ties both axles to one carrier, so the engine sees their
+     * mean, not the driven-torque-weighted blend. A wheel that is spinning raises engine
+     * speed whether or not its axle is receiving the larger share. */
+    return 0.5f * (frontMean + rearMean);
+}
+
+void drivetrain_split_axle_torque(DifferentialMode mode, float axleTorqueNm,
+                                  float omegaLeftRadS, float omegaRightRadS,
+                                  float tireReactionTorqueLeftNm,
+                                  float tireReactionTorqueRightNm, float biasRatio,
+                                  float preloadNm, float *torqueLeftNm, float *torqueRightNm)
+{
+    /* Baseline: equal torque split (LOCKED and OPEN). */
+    const float halfAxleTorqueNm = axleTorqueNm * 0.5f;
+    float left = halfAxleTorqueNm;
+    float right = halfAxleTorqueNm;
+
+    if (mode == DIFF_LSD) {
+        /* Torque-biasing clutch: the LSD transfers torque from the faster wheel to the
+         * slower wheel, limited by the grip of the wheel with less traction. */
+        const float dOmega = omegaLeftRadS - omegaRightRadS;
+        if (fabsf(dOmega) > DIFF_OMEGA_EPSILON_RAD_S) {
+            const float gripTorqueMin =
+                fminf(fabsf(tireReactionTorqueLeftNm), fabsf(tireReactionTorqueRightNm));
+            const float capacity = preloadNm + (biasRatio - 1.0f) * gripTorqueMin;
+            const float dT = fminf(capacity, fabsf(axleTorqueNm * 0.5f));
+            if (dOmega > 0.0f) { /* left faster → bias torque to right */
+                left -= dT;
+                right += dT;
+            } else { /* right faster → bias torque to left */
+                left += dT;
+                right -= dT;
+            }
+        }
+    }
+
+    if (torqueLeftNm != NULL) *torqueLeftNm = left;
+    if (torqueRightNm != NULL) *torqueRightNm = right;
+}
+
 DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int selectedGear,
-                                               float rearOmegaLeftRadS,
-                                               float rearOmegaRightRadS,
-                                               float rearTireReactionTorqueLeftNm,
-                                               float rearTireReactionTorqueRightNm,
+                                               const float omegaRadS[WHEEL_COUNT],
+                                               const float tireReactionTorqueNm[WHEEL_COUNT],
                                                float throttle, float brake, float handbrake)
 {
     DrivetrainTorques out;
     memset(&out, 0, sizeof(out));
-    if (spec == NULL) return out;
+    if (spec == NULL || omegaRadS == NULL || tireReactionTorqueNm == NULL) return out;
 
     throttle = clampf(throttle, 0.0f, 1.0f);
     brake = clampf(brake, 0.0f, 1.0f);
     handbrake = clampf(handbrake, 0.0f, 1.0f);
 
     const DifferentialMode diffMode = (DifferentialMode)(int)spec->differentialMode;
+    const float frontShare = drivetrain_front_torque_share(spec);
 
-    /* Engine RPM is derived from the average rear omega for consistency across all diff
+    /* Engine RPM is derived from the average DRIVEN omega for consistency across all diff
      * modes (the engine is connected to the differential, not individual wheels). */
-    const float rearAngularVelocityRadS = 0.5f * (rearOmegaLeftRadS + rearOmegaRightRadS);
+    const float drivenAngularVelocityRadS = drivetrain_driven_mean_omega(omegaRadS, frontShare);
     out.totalGearRatio = drivetrain_total_gear_ratio(spec, selectedGear);
-    const float rpm = drivetrain_engine_rpm(spec, selectedGear, rearAngularVelocityRadS);
+    const float rpm = drivetrain_engine_rpm(spec, selectedGear, drivenAngularVelocityRadS);
     float curveTorqueNm = drivetrain_engine_torque_at_rpm(spec, rpm);
 
     /* Rev limiter: drive torque tapers to zero over the last 500 rpm before redline. The
@@ -92,8 +154,8 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
      * cycle oscillated longitudinal load transfer). Engine braking is unaffected: it is
      * subtracted separately below. */
     if (out.totalGearRatio != 0.0f) {
-        const float rawRpm =
-            fabsf(rearAngularVelocityRadS) * fabsf(out.totalGearRatio) * 60.0f / DRIFTY_TWO_PI;
+        const float rawRpm = fabsf(drivenAngularVelocityRadS) * fabsf(out.totalGearRatio) *
+                             60.0f / DRIFTY_TWO_PI;
         const float limiterStartRpm = spec->engineRedlineRpm - 500.0f;
         if (rawRpm > limiterStartRpm) {
             const float fade = clampf((spec->engineRedlineRpm - rawRpm) / 500.0f, 0.0f, 1.0f);
@@ -114,9 +176,9 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
      * the UNCLAMPED driveline rpm so the fade engages exactly where the idle clamp does. */
 #define ENGINE_BRAKING_FADE_RPM_SPAN 300.0f
     float engineBrakingScale = 0.0f;
-    if (fabsf(rearAngularVelocityRadS) > 1e-4f && out.totalGearRatio != 0.0f) {
-        const float rawRpm =
-            fabsf(rearAngularVelocityRadS) * fabsf(out.totalGearRatio) * 60.0f / DRIFTY_TWO_PI;
+    if (fabsf(drivenAngularVelocityRadS) > 1e-4f && out.totalGearRatio != 0.0f) {
+        const float rawRpm = fabsf(drivenAngularVelocityRadS) * fabsf(out.totalGearRatio) *
+                             60.0f / DRIFTY_TWO_PI;
         engineBrakingScale =
             clampf((rawRpm - spec->engineIdleRpm) / ENGINE_BRAKING_FADE_RPM_SPAN, 0.0f, 1.0f);
     }
@@ -126,33 +188,28 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
     out.drivelineTorqueNm =
         out.engineTorqueNm * out.totalGearRatio * spec->drivetrainEfficiency;
 
-    /* Baseline: equal torque split (LOCKED and OPEN). */
-    const float halfDrivelineTorqueNm = out.drivelineTorqueNm * 0.5f;
-    float driveTL = halfDrivelineTorqueNm;
-    float driveTR = halfDrivelineTorqueNm;
+    /* Split the driveline torque across the axles, then through each driven axle's
+     * differential. An axle receiving no share is left at zero rather than run through the
+     * differential: multiplying by a zero share already gives zero torque, and skipping the
+     * call keeps a single-axle car's arithmetic exactly what it was before AWD existed. */
+    const float frontAxleTorqueNm = out.drivelineTorqueNm * frontShare;
+    const float rearAxleTorqueNm = out.drivelineTorqueNm * (1.0f - frontShare);
 
-    if (diffMode == DIFF_LSD) {
-        /* Torque-biasing clutch: the LSD transfers torque from the faster wheel to the
-         * slower wheel, limited by the grip of the wheel with less traction. */
-        const float dOmega = rearOmegaLeftRadS - rearOmegaRightRadS;
-        if (fabsf(dOmega) > DIFF_OMEGA_EPSILON_RAD_S) {
-            const float gripTorqueMin = fminf(fabsf(rearTireReactionTorqueLeftNm),
-                                              fabsf(rearTireReactionTorqueRightNm));
-            const float capacity = spec->differentialPreloadNm +
-                                   (spec->differentialBiasRatio - 1.0f) * gripTorqueMin;
-            const float dT = fminf(capacity, fabsf(out.drivelineTorqueNm * 0.5f));
-            if (dOmega > 0.0f) { /* left faster → bias torque to right */
-                driveTL -= dT;
-                driveTR += dT;
-            } else { /* right faster → bias torque to left */
-                driveTL += dT;
-                driveTR -= dT;
-            }
-        }
+    if (frontShare > 0.0f) {
+        drivetrain_split_axle_torque(
+            diffMode, frontAxleTorqueNm, omegaRadS[WHEEL_FRONT_LEFT],
+            omegaRadS[WHEEL_FRONT_RIGHT], tireReactionTorqueNm[WHEEL_FRONT_LEFT],
+            tireReactionTorqueNm[WHEEL_FRONT_RIGHT], spec->differentialBiasRatio,
+            spec->differentialPreloadNm, &out.driveTorqueNm[WHEEL_FRONT_LEFT],
+            &out.driveTorqueNm[WHEEL_FRONT_RIGHT]);
     }
-
-    out.driveTorqueNm[WHEEL_REAR_LEFT] = driveTL;
-    out.driveTorqueNm[WHEEL_REAR_RIGHT] = driveTR;
+    if (frontShare < 1.0f) {
+        drivetrain_split_axle_torque(
+            diffMode, rearAxleTorqueNm, omegaRadS[WHEEL_REAR_LEFT], omegaRadS[WHEEL_REAR_RIGHT],
+            tireReactionTorqueNm[WHEEL_REAR_LEFT], tireReactionTorqueNm[WHEEL_REAR_RIGHT],
+            spec->differentialBiasRatio, spec->differentialPreloadNm,
+            &out.driveTorqueNm[WHEEL_REAR_LEFT], &out.driveTorqueNm[WHEEL_REAR_RIGHT]);
+    }
 
     const float frontServiceTotalNm = brake * spec->maxBrakeTorqueNm * spec->brakeBiasFront;
     const float rearServiceTotalNm =

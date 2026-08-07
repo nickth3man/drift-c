@@ -55,16 +55,17 @@ void auto_transmission_update(AutoTransmission *at, VehicleState *vs, const Vehi
             at->neutralTimer += dt;
 
             if (at->neutralTimer > AUTO_NEUTRAL_DELAY_S) {
-                if (io->brake > 0.0f) {
-                    vs->selectedGear = -1;
-                    at->driveState = AUTO_REVERSE;
-                } else if (io->throttle > 0.0f) {
+                if (io->throttle > 0.0f) {
                     vs->selectedGear = 1;
                     at->driveState = AUTO_DRIVE;
+                } else if (io->brake > 0.0f && !at->forwardOnly) {
+                    vs->selectedGear = -1;
+                    at->driveState = AUTO_REVERSE;
                 }
             }
 
-            /* Zero throttle AFTER transition check */
+            /* Zero throttle AFTER the transition check. Forward-only mode keeps a stopped
+             * research maneuver neutral while the service brake remains held. */
             io->throttle = 0.0f;
             break;
         }

@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "raylib.h"
 
@@ -133,14 +134,44 @@ typedef struct {
     int height;
     int ticks; /* -1: use the scene's own tick count */
     uint32_t seed;
-    int galleryPage; /* 0: not a gallery capture; >=1: the 1-based page */
+    int galleryPage;   /* 0: not a gallery capture; >=1: the 1-based page */
+    bool video;        /* --capture-scene writes an MP4 of every frame, not one PNG */
+    const char *track; /* NULL: leave whatever game_init() loaded */
+    float cameraZoom;  /* 0: leave the default; >0 overrides, for whole-track framing */
 } Options;
+
+/*
+ * Apply the run options that only the game module can act on. Track and vehicle code lives in
+ * the reloadable module, so the platform layer hands over plain data and lets
+ * game_configure_run() do the work. Unknown names are reported rather than silently ignored.
+ */
+static bool apply_run_options(Game *game, const Options *options)
+{
+    GameRunConfig config;
+    memset(&config, 0, sizeof(config));
+    config.cameraZoomOverride = options->cameraZoom;
+    config.track = GAME_TRACK_KEEP;
+
+    if (options->track != NULL) {
+        if (strcmp(options->track, "chicane") == 0) {
+            config.track = GAME_TRACK_CHICANE;
+        } else if (strcmp(options->track, "lot") == 0 ||
+                   strcmp(options->track, "parking_lot") == 0) {
+            config.track = GAME_TRACK_PARKING_LOT;
+        } else {
+            fprintf(stderr, "error: unknown track '%s' (try 'chicane' or 'lot')\n",
+                    options->track);
+            return false;
+        }
+    }
+    return game_configure_run(game, &config);
+}
 
 static void print_usage(const char *argv0)
 {
     printf("usage: %s [--smoke-test]\n", argv0);
     printf("       %s --capture-scene NAME [--width W] [--height H] [--ticks N]\n", argv0);
-    printf("               [--seed N] [--output PATH]\n");
+    printf("               [--seed N] [--output PATH] [--video]\n");
     printf("       %s --list-scenes\n", argv0);
 }
 
@@ -155,6 +186,9 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     options->ticks = -1;
     options->seed = 0u;
     options->galleryPage = 0;
+    options->video = false;
+    options->track = NULL;
+    options->cameraZoom = 0.0f;
     *statusOut = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -186,6 +220,12 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
             options->seed = (uint32_t)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(arg, "--gallery-page") == 0 && hasValue) {
             options->galleryPage = atoi(argv[++i]);
+        } else if (strcmp(arg, "--video") == 0) {
+            options->video = true;
+        } else if (strcmp(arg, "--track") == 0 && hasValue) {
+            options->track = argv[++i];
+        } else if (strcmp(arg, "--camera-zoom") == 0 && hasValue) {
+            options->cameraZoom = (float)atof(argv[++i]);
         } else {
             fprintf(stderr, "error: unrecognised argument '%s'\n", arg);
             print_usage(argv[0]);
@@ -222,6 +262,7 @@ static int run_capture(Game *game, const Options *options)
                                                        : "artifacts/screenshots/capture.png";
 
     game_init(game);
+    if (!apply_run_options(game, options)) return 2;
     game->debugOverlay = scene->debugOverlay;
     game->dev.labVisible = scene->lab;
     game->dev.uiDeterministic = true;
@@ -258,6 +299,134 @@ static int run_capture(Game *game, const Options *options)
 
     printf("CAPTURE: scene=%s ticks=%d size=%dx%d checksum=%08x -> %s\n", scene->name, ticks,
            options->width, options->height, game->stateChecksum, output);
+    return 0;
+}
+
+/*
+ * Deterministic video capture. Same contract as run_capture() above — the simulation is
+ * advanced with an exact fixed dt, never GetFrameTime() — except that every frame is read
+ * back and streamed to ffmpeg instead of only the last one being written as a PNG.
+ *
+ * TICKS_PER_FRAME couples the two rates: at FIXED_HZ 120 and 2 ticks per frame the video is
+ * 60 fps, and frame N is simulation tick 2N. Telemetry sampled on the same boundary therefore
+ * lines up row-for-frame, which is what lets a suspicious video frame be looked up directly
+ * in the CSV.
+ *
+ * Frames go down a pipe rather than to disk: a 60 s run is ~3600 frames and ~13 GB of raw
+ * RGBA, which is fine to stream and absurd to store.
+ */
+#define VIDEO_TICKS_PER_FRAME 2
+#define VIDEO_FPS (FIXED_HZ / VIDEO_TICKS_PER_FRAME)
+
+static int run_capture_video(Game *game, const Options *options)
+{
+    const CaptureScene *scene = find_capture_scene(options->captureScene);
+    if (scene == NULL) {
+        fprintf(stderr, "error: no capture scene named '%s' (try --list-scenes)\n",
+                options->captureScene);
+        return 2;
+    }
+
+    const int scenarioIndex = dev_scenario_find(scene->scenario);
+    const int ticks = (options->ticks >= 0) ? options->ticks : scene->ticks;
+    const char *output =
+        (options->outputPath != NULL) ? options->outputPath : "artifacts/video/capture.mp4";
+
+    ensure_parent_directory(output);
+
+    /* -an: no audio track. -crf 20: visually lossless enough to read a HUD overlay off.
+     * yuv420p rather than the native rgba so the result plays in every consumer player. */
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgba -s %dx%d -r %d -i - "
+             "-an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p \"%s\"",
+             options->width, options->height, VIDEO_FPS, output);
+
+    /* "wb" is not optional on Windows: text mode would translate every 0x0A byte in the
+     * pixel stream into 0x0D 0x0A and corrupt the video. */
+    FILE *pipe = _popen(command, "wb");
+    if (pipe == NULL) {
+        fprintf(stderr, "error: could not start ffmpeg. Is it on PATH?\n");
+        return 3;
+    }
+
+    game_init(game);
+
+    /* game_init() leaves a windowed build in STATE_MENU, and game_fixed_update() runs no
+     * physics outside STATE_PLAYING. A scripted scenario only writes held controls, never the
+     * pause press that would start the game, so without this the simulation sits still for
+     * the whole capture and the video shows a stationary car under the menu overlay. The
+     * headless build already does exactly this in game_init(). */
+    game->state = STATE_PLAYING;
+
+    if (!apply_run_options(game, options)) {
+        _pclose(pipe);
+        return 2;
+    }
+
+    game->debugOverlay = scene->debugOverlay;
+    game->dev.labVisible = scene->lab;
+    game->dev.uiDeterministic = true;
+    game->dev.scopePreset = scene->scopePreset;
+    game->dev.showLoads = scene->showLoads;
+    game->dev.showResistance = scene->showResistance;
+
+    if (scenarioIndex > 0) {
+        const DevScenario *scenario = dev_scenario_at(scenarioIndex);
+        game->dev.scenario = scenarioIndex;
+        game->dev.scenarioRunning = true;
+        game->dev.scenarioStartTick = game->sim.tick;
+        game->dev.seed = (options->seed != 0u) ? options->seed : scenario->seed;
+    }
+
+    const int frameCount = ticks / VIDEO_TICKS_PER_FRAME;
+    const clock_t started = clock();
+    double readbackSeconds = 0.0;
+    int framesWritten = 0;
+    bool writeFailed = false;
+
+    for (int frame = 0; frame < frameCount && !writeFailed; frame++) {
+        for (int sub = 0; sub < VIDEO_TICKS_PER_FRAME; sub++) {
+            game_fixed_update(game, FIXED_DT_S);
+        }
+
+        /* Interpolation alpha 0: the drawn pose is exactly the last simulated one, so a video
+         * frame shows a state that also exists in the telemetry rather than a blend of two. */
+        game_draw(game, 0.0f);
+
+        const clock_t readStart = clock();
+        Image shot = LoadImageFromScreen();
+        readbackSeconds += (double)(clock() - readStart) / CLOCKS_PER_SEC;
+
+        if (shot.data == NULL) {
+            fprintf(stderr, "error: LoadImageFromScreen returned no data at frame %d\n", frame);
+            writeFailed = true;
+            break;
+        }
+        const size_t bytes = (size_t)shot.width * (size_t)shot.height * 4u;
+        if (fwrite(shot.data, 1, bytes, pipe) != bytes) {
+            fprintf(stderr, "error: short write to ffmpeg at frame %d\n", frame);
+            writeFailed = true;
+        }
+        UnloadImage(shot);
+        framesWritten++;
+    }
+
+    const int status = _pclose(pipe);
+    const double elapsed = (double)(clock() - started) / CLOCKS_PER_SEC;
+
+    if (writeFailed) return 3;
+    if (status != 0) {
+        fprintf(stderr, "error: ffmpeg exited %d\n", status);
+        return 3;
+    }
+
+    printf("VIDEO: scene=%s frames=%d (%d ticks) %dx%d @%d fps checksum=%08x -> %s\n",
+           scene->name, framesWritten, ticks, options->width, options->height, VIDEO_FPS,
+           game->stateChecksum, output);
+    printf("VIDEO: %.2f s total, %.2f ms/frame (readback %.2f ms/frame, %.0f%% of it)\n",
+           elapsed, elapsed * 1000.0 / (double)framesWritten,
+           readbackSeconds * 1000.0 / (double)framesWritten, 100.0 * readbackSeconds / elapsed);
     return 0;
 }
 
@@ -325,10 +494,19 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    SetTargetFPS(TARGET_FPS);
+    /*
+     * Bounded capture modes are offline renders, not playback: the frame limiter would pace
+     * them to real time for no benefit, so a 60 s lap would take 60 s to encode and the
+     * measured cost would be the limiter rather than the work. Only the interactive and smoke
+     * paths, which a human actually watches, are paced. Determinism is unaffected either way —
+     * these modes step the simulation with an exact fixed dt and never read GetFrameTime().
+     */
+    SetTargetFPS((capture || gallery) ? 0 : TARGET_FPS);
 
     if (capture || gallery) {
-        const int status = capture ? run_capture(game, &options) : run_gallery(game, &options);
+        const int status = capture ? (options.video ? run_capture_video(game, &options)
+                                                    : run_capture(game, &options))
+                                   : run_gallery(game, &options);
         game_shutdown(game);
         CloseWindow();
         Game_UnloadModule();
@@ -337,6 +515,13 @@ int main(int argc, char **argv)
     }
 
     game_init(game);
+    if (!apply_run_options(game, &options)) {
+        game_shutdown(game);
+        CloseWindow();
+        Game_UnloadModule();
+        free(game);
+        return 2;
+    }
     if (smoke_test) {
         /* Force the debug overlay so the screenshot captures reload status and held-input
          * lines without requiring an F1 press. */

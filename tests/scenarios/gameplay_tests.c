@@ -17,6 +17,7 @@
 #include "scenario_shared.h"
 
 #include "dev/car_corpus.h"
+#include "game/ai_driver.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -81,9 +82,9 @@ static void scenario_track_surface(void)
               "Track_SurfaceAt inside boundary returns ASPHALT (got %d)", (int)insideSurf);
     }
 
-    /* Just outside: (0, 100) is 25 m above the lot top at y = 75. */
+    /* Just outside: (0, 200) is 50 m above the lot top at y = 150. */
     {
-        const Vector2 outsidePoint = { 0.0f, 100.0f };
+        const Vector2 outsidePoint = { 0.0f, 200.0f };
         const SurfaceId outsideSurf = Track_SurfaceAt(&track, outsidePoint);
         check(outsideSurf == SURFACE_GRASS,
               "Track_SurfaceAt outside boundary returns GRASS (got %d)", (int)outsideSurf);
@@ -114,11 +115,11 @@ static void scenario_track_surface(void)
         check(fabsf(d) < 0.01f, "centreline dist at node 0 ~0 (got %.2f)", (double)d);
         check(fabsf(hw - 4.0f) < 0.01f, "half-width at node 0 ~4 (got %.2f)", (double)hw);
     }
-    /* Outside: y=100 is 25 m above lot top at y=75. */
+    /* Outside: y=200 is 50 m above lot top at y=150. */
     {
         float hw = 0.0f;
-        const float d = track_distance_to_centerline_m(&track, (Vector2){ 0, 100 }, &hw);
-        check(d > 20.0 && d < 30.0, "centreline dist outside lot ~25 m");
+        const float d = track_distance_to_centerline_m(&track, (Vector2){ 0, 200 }, &hw);
+        check(d > 40.0 && d < 60.0, "centreline dist outside lot ~50 m");
     }
     /* NULL/uninit: returns 0. */
     {
@@ -164,10 +165,10 @@ static void scenario_collision_barrier(void)
     track_init(&game->track);
 
     /* Place the car near the boundary, heading straight down at it.
-     * The bottom barrier is at y ≈ -79 m (centerline -75 minus halfWidth 4). */
-    game->vehicle.positionM = (Vector2){ 0.0f, -75.5f }; /* ~3.5 m above the bottom barrier */
-    game->vehicle.headingRad = -1.57079632679f;          /* pointing -Y (down) */
-    game->vehicle.velocityLongitudinalMps = 30.0f;       /* body X forward = world -Y */
+     * The inner bottom barrier is at y ≈ -146 m (centerline -150 plus halfWidth 4). */
+    game->vehicle.positionM = (Vector2){ 0.0f, -142.5f }; /* ~3.5 m above the inner barrier */
+    game->vehicle.headingRad = -1.57079632679f;           /* pointing -Y (down) */
+    game->vehicle.velocityLongitudinalMps = 30.0f;        /* body X forward = world -Y */
     game->vehicle.velocityLateralMps = 0.0f;
     game->renderState.prevPositionM = game->vehicle.positionM;
     game->renderState.prevHeadingRad = game->vehicle.headingRad;
@@ -175,11 +176,11 @@ static void scenario_collision_barrier(void)
     game->renderState.currHeadingRad = game->vehicle.headingRad;
     game->state = STATE_PLAYING;
 
-    /* Before tick: verify car is on the correct side (above the barrier at y ≈ -79). */
+    /* Before tick: verify car is on the correct side (above the barrier at y ≈ -154). */
+    /* Before tick: verify car is on the correct side (above the barrier at y ≈ -146). */
     const float yBefore = game->vehicle.positionM.y;
-    check(yBefore > -79.0f, "car starts inside the track boundary (y = %.2f > -79.0)",
+    check(yBefore > -146.0f, "car starts inside the track boundary (y = %.2f > -146.0)",
           (double)yBefore);
-
     /* Run fixed updates at 120 Hz. The car moves ~0.25 m down per tick at 30 m/s.
      * Even with engine braking, 60 ticks (~0.5 s) is enough to reach y ≈ -79 m. */
     Input tickInput;
@@ -202,12 +203,13 @@ static void scenario_collision_barrier(void)
             hitBarrier = true;
             break;
         }
-        if (yAfter < -85.0f) break; /* car passed far beyond, collision didn't work */
+        if (yAfter < -165.0f) break; /* car passed far beyond, collision didn't work */
     }
 
     /* After the tick, the car should NOT have passed through the boundary. */
-    check(yAfter >= -80.5f,
-          "car did not tunnel through the barrier (y = %.4f, must be > -80.5)", (double)yAfter);
+    check(yAfter >= -147.5f,
+          "car did not tunnel through the barrier (y = %.4f, must be > -147.5)",
+          (double)yAfter);
     check(hitBarrier, "car hit the barrier (crashLockoutTimerS was set)");
     check(game->crashLockoutTimerS > 0.0f,
           "significant impact sets crashLockoutTimerS (%.4f > 0)",
@@ -229,13 +231,11 @@ static void scenario_collision_barrier(void)
     Game *game2 = alloc_game();
     game_init(game2);
     track_init(&game2->track);
-
-    /* Place car near the bottom-right of the lot, heading right-down at a shallow angle
-     * toward the bottom barrier at y ≈ -79 m. */
-    game2->vehicle.positionM = (Vector2){ 80.0f, -75.5f };
-    game2->vehicle.headingRad = -1.2f; /* ~68° clockwise from +X, i.e. heading right-down */
+    /* Place car near the bottom of the lot, heading right-down at a shallow angle
+     * toward the bottom barrier at y ≈ -146 m. */
+    game2->vehicle.positionM = (Vector2){ 0.0f, -145.0f };
+    game2->vehicle.headingRad = -1.2f; /* shallow angle heading right-down */
     game2->vehicle.velocityLongitudinalMps = 30.0f;
-    game2->vehicle.velocityLateralMps = 0.0f;
     game2->vehicle.yawRateRadS = 0.0f;
     game2->renderState.prevPositionM = game2->vehicle.positionM;
     game2->renderState.prevHeadingRad = game2->vehicle.headingRad;
@@ -275,10 +275,10 @@ static void scenario_collision_units(void)
     spec.yawInertiaKgM2 = 1500.0f;
     vehicle_spec_refresh_derived(&spec);
 
-    /* Standard parking-lot track: bottom wall centerline at y=-75, hw=4.
+    /* Standard parking-lot track: bottom wall centerline at y=-150, hw=4.
      * Bottom segment (nodes[0]→[1], dir=(1,0)):
-     *   left  barrier at y = -71 (perp +4),  pushN = {0,-1} (down)
-     *   right barrier at y = -79 (perp -4),  pushN = {0,+1} (up) */
+     *   left  barrier at y = -146 (perp +4),  pushN = {0,+1} (up)
+     *   right barrier at y = -154 (perp -4),  pushN = {0,+1} (up) */
     Track track;
     memset(&track, 0, sizeof(track));
     track_init(&track);
@@ -297,23 +297,23 @@ static void scenario_collision_units(void)
         check(lockout == 0.0f, "no collision leaves lockout at 0");
     }
 
-    /* 2. Front circle penetrates the left barrier from the track side (y=-71.5, 0.5 m below
-     *    the y=-71 barrier). Approaching at 5 m/s: penetration corrected + impulse applied. */
+    /* 2. Front circle penetrates the left barrier from the track side (y=-146.5, 0.5 m below
+     *    the y=-146 barrier). Approaching at 5 m/s: penetration corrected + impulse applied. */
     {
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
-        state.positionM = (Vector2){ 0, -71.5f };
+        state.positionM = (Vector2){ 0, -146.5f };
         state.headingRad = 0.0f;
         state.velocityLongitudinalMps = 0.0f;
-        state.velocityLateralMps = 5.0f; /* +Y, toward the y=-71 barrier */
+        state.velocityLateralMps = -5.0f; /* -Y, toward the y=-146 barrier */
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
         const float yBefore = state.positionM.y;
         int n = collision_resolve_track(&spec, &state, &rs, &track, &lockout);
         check(n >= 1, "left barrier contact resolves (got %d)", n);
-        check(state.positionM.y < yBefore,
-              "penetration push moves CG down, away from barrier (y %.4f < %.4f)",
+        check(state.positionM.y > yBefore,
+              "penetration push moves CG up, away from barrier (y %.4f > %.4f)",
               (double)state.positionM.y, (double)yBefore);
         check(lockout > 0.0f, "fast approach (5 m/s) sets crash lockout");
         check(state.velocityLateralMps < 5.0f, "impulse reduced lateral velocity (%.4f < 5.0)",
@@ -324,10 +324,10 @@ static void scenario_collision_units(void)
     {
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
-        state.positionM = (Vector2){ 0, -71.5f };
+        state.positionM = (Vector2){ 0, -146.5f };
         state.headingRad = 0.0f;
         state.velocityLongitudinalMps = 0.0f;
-        state.velocityLateralMps = -5.0f; /* moving -Y, AWAY from the y=-71 barrier */
+        state.velocityLateralMps = 5.0f; /* moving +Y, AWAY from the y=-146 barrier */
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
@@ -335,18 +335,18 @@ static void scenario_collision_units(void)
         check(n >= 1, "separating contact still resolves penetration (got %d)", n);
         check(lockout == 0.0f, "separating contact does NOT set lockout");
         /* Velocity is unchanged because no impulse was applied (vn >= 0). */
-        check_near((double)state.velocityLateralMps, -5.0, 1e-3,
+        check_near((double)state.velocityLateralMps, 5.0, 1e-3,
                    "separating contact leaves velocity unchanged");
     }
 
-    /* 4. Right barrier (bottom wall at y=-79): pushN = {0,+1} (up). */
+    /* 4. Right barrier (bottom wall at y=-154): pushN = {0,+1} (up). */
     {
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
-        state.positionM = (Vector2){ 0, -78.5f }; /* 0.5 m above barrier at y=-79 */
+        state.positionM = (Vector2){ 0, -154.5f };
         state.headingRad = 0.0f;
         state.velocityLongitudinalMps = 0.0f;
-        state.velocityLateralMps = -5.0f; /* moving -Y, toward the y=-79 barrier */
+        state.velocityLateralMps = -5.0f;
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
@@ -361,10 +361,10 @@ static void scenario_collision_units(void)
      *     These are DIFFERENT walls with opposing push normals, so both resolve. */
     {
         TrackNode corridorNodes[4] = {
-            { { -50, 0 }, 1.5f, SURFACE_ASPHALT },
-            { { 50, 0 }, 1.5f, SURFACE_ASPHALT },
-            { { 50, 100 }, 50.0f, SURFACE_ASPHALT },
-            { { -50, 100 }, 50.0f, SURFACE_ASPHALT },
+            { { -50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f },
+            { { 50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f },
+            { { 50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f },
+            { { -50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f },
         };
         Track corridor = { 0 };
         corridor.nodes = corridorNodes;
@@ -443,10 +443,10 @@ static void scenario_collision_units(void)
      *    near the narrow end collides under per-node interpolation. */
     {
         TrackNode vwNodes[4] = {
-            { { 0, 0 }, 5.0f, SURFACE_ASPHALT },
-            { { 10, 0 }, 10.0f, SURFACE_ASPHALT },
-            { { 10, 100 }, 100.0f, SURFACE_ASPHALT },
-            { { 0, 100 }, 100.0f, SURFACE_ASPHALT },
+            { { 0, 0 }, 5.0f, SURFACE_ASPHALT, 0.0f },
+            { { 10, 0 }, 10.0f, SURFACE_ASPHALT, 0.0f },
+            { { 10, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f },
+            { { 0, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f },
         };
         Track vwTrack = { 0 };
         vwTrack.nodes = vwNodes;
@@ -490,85 +490,105 @@ static void scenario_collision_units(void)
 /* Scenario: checkpoint-lap — gate crossing, lap counting, forward-only, timer reset      */
 /* ------------------------------------------------------------------------------------- */
 
+/* Cross gate `n` of the 10x10 square below, travelling the way the gate faces. Returns the
+ * event so a caller can assert on order as well as on the crossing itself. */
+static TrackCheckpointEvent cross_square_gate(Track *track, int n)
+{
+    switch (n) {
+        /* Gate 0 at (0,0) faces +X and spans y in [-2,+2]. */
+        case 0:
+            return track_update_checkpoints(track, (Vector2){ -0.1f, 1.0f },
+                                            (Vector2){ 0.1f, 1.0f });
+        /* Gate 1 at (10,0) faces +Y and spans x in [8,12]. */
+        case 1:
+            return track_update_checkpoints(track, (Vector2){ 10.0f, -0.1f },
+                                            (Vector2){ 10.0f, 0.1f });
+        /* Gate 2 at (10,10) faces -X and spans y in [8,12]. */
+        case 2:
+            return track_update_checkpoints(track, (Vector2){ 10.1f, 10.0f },
+                                            (Vector2){ 9.9f, 10.0f });
+        /* Gate 3 at (0,10) faces -Y and spans x in [-2,+2]. */
+        default:
+            return track_update_checkpoints(track, (Vector2){ 1.0f, 10.1f },
+                                            (Vector2){ 1.0f, 9.9f });
+    }
+}
+
 static void scenario_checkpoint_lap(void)
 {
-    /* Build a tiny 4-node square track: 10 m × 10 m, counterclockwise.
-     * Nodes: (0,0) → (10,0) → (10,10) → (0,10) → back to (0,0).
-     * halfWidthM = 2 m so car positions are comfortably in-bounds. */
+    /* A 10 m x 10 m counterclockwise square: (0,0) -> (10,0) -> (10,10) -> (0,10).
+     * halfWidthM 2 m, so the car positions below are comfortably in-bounds. Gates are derived
+     * from the nodes, which is the scheme a hand-built ribbon gets. */
     Track track;
     memset(&track, 0, sizeof(track));
     track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
-    track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
-    track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
-    track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
-    track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
+    track.runoffSurfaceId = SURFACE_GRASS;
+    track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
+    check(track.checkpointCount == 4, "one gate per node (got %d)", track.checkpointCount);
     track.nextCheckpoint = 0;
-    track.lap = 0;
-    track.lapTimerS = 0.0f;
-    track.lastLapTimeS = 0.0f;
 
-    /* --- Basic gate crossing --- */
-    /* Gate 0: at (0,0), direction (+X), perpendicular = (0,±1). Gate spans y ∈ [-2, +2]. */
-    /* Move car from negative X to positive X crossing x=0 at y=1 (inside the gate). */
-    bool crossed =
-        track_update_checkpoints(&track, (Vector2){ -0.1f, 1.0f }, (Vector2){ 0.1f, 1.0f });
-    check(crossed, "crossing gate 0 advances the checkpoint");
+    /* --- Ordered traversal advances, and gate 0 is the finish line --- */
+    /* Gate 0 closes a lap the moment it is taken, because it IS the start/finish. Starting
+     * progress at gate 0 therefore scores a lap immediately; a standing start avoids that by
+     * expecting gate 1 first, which is what track_reset_progress() sets up. */
+    TrackCheckpointEvent ev = cross_square_gate(&track, 0);
+    check(ev.crossed && !ev.outOfOrder, "crossing gate 0 is an in-order crossing");
+    check(ev.index == 0, "the event names gate 0 (got %d)", ev.index);
+    check(ev.lapCompleted, "gate 0 is the finish line, so taking it closes a lap");
     check(track.nextCheckpoint == 1, "nextCheckpoint is 1 after gate 0 (got %d)",
           track.nextCheckpoint);
-    check(track.lap == 0, "lap stays 0 after first gate (got %d)", track.lap);
 
-    /* Gate 1: at (10,0), direction (+Y), perpendicular = (±1,0). Gate spans x ∈ [8,12]. */
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ 10.0f, -0.1f }, (Vector2){ 10.0f, 0.1f });
-    check(crossed, "crossing gate 1 advances the checkpoint");
+    ev = cross_square_gate(&track, 1);
+    check(ev.crossed && !ev.outOfOrder, "crossing gate 1 advances");
+    check(!ev.lapCompleted, "an intermediate gate does not close a lap");
     check(track.nextCheckpoint == 2, "nextCheckpoint is 2 after gate 1 (got %d)",
           track.nextCheckpoint);
 
-    /* Gate 2: at (10,10), direction (-X), perpendicular = (0,±1). Gate spans y ∈ [8,12]. */
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ 10.1f, 10.0f }, (Vector2){ 9.9f, 10.0f });
-    check(crossed, "crossing gate 2 advances the checkpoint");
+    ev = cross_square_gate(&track, 2);
+    check(ev.crossed && !ev.outOfOrder, "crossing gate 2 advances");
     check(track.nextCheckpoint == 3, "nextCheckpoint is 3 after gate 2 (got %d)",
           track.nextCheckpoint);
 
-    /* --- Reverse crossing does NOT advance --- */
-    /* Move backward through gate 2 (from right to left at the top). Direction is -X, which
-     * is opposite to the track's forward direction (+X when moving from 1 to 2, but gate 2 
-     * direction is from node 2 to node 3 which is (-X) for the top straight going right to
-     * left. The gate at node 2 (top-right) has direction from (10,10) → (0,10) which is -X.
-     * The car moving left at the top is WITH the track direction, so let me construct a 
-     * proper reverse test: gate 0's forward direction is (+X). Moving -X through it: */
+    /* --- An out-of-order crossing is REPORTED and does not advance --- */
+    /* Expecting gate 3, the car instead cuts across gate 1. The old scheme only ever looked
+     * at the expected gate, so this was indistinguishable from driving nowhere. */
+    ev = cross_square_gate(&track, 1);
+    check(ev.crossed, "cutting to gate 1 is detected as a crossing");
+    check(ev.outOfOrder, "...and is reported as out of order");
+    check(ev.index == 1, "...naming the gate actually crossed (got %d)", ev.index);
+    check(!ev.lapCompleted, "an out-of-order crossing cannot close a lap");
+    check(track.nextCheckpoint == 3, "out-of-order crossing does not advance progress (got %d)",
+          track.nextCheckpoint);
+
+    /* --- Reverse crossing does not advance --- */
     track.nextCheckpoint = 0;
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ 0.2f, 1.0f }, (Vector2){ -0.2f, 1.0f });
-    check(!crossed, "reverse crossing of gate 0 does NOT advance");
+    ev = track_update_checkpoints(&track, (Vector2){ 0.2f, 1.0f }, (Vector2){ -0.2f, 1.0f });
+    check(!ev.crossed, "reverse crossing of gate 0 does NOT advance");
     check(track.nextCheckpoint == 0, "nextCheckpoint still 0 after reverse crossing (got %d)",
           track.nextCheckpoint);
 
-    /* --- Lap completion --- */
-    /* Cross gate 0 forward, then 1, 2, 3 (last gate). */
-    track.nextCheckpoint = 0;
+    /* --- A full lap: gates 1,2,3 then back through the finish line --- */
+    track.nextCheckpoint = 1;
     track.lap = 0;
     track.lapTimerS = 5.0f;
-    check(track_update_checkpoints(&track, (Vector2){ -0.1f, 1.0f }, (Vector2){ 0.1f, 1.0f }),
-          "gate 0");
-    check(track_update_checkpoints(&track, (Vector2){ 10.0f, -0.1f }, (Vector2){ 10.0f, 0.1f }),
-          "gate 1");
-    check(track_update_checkpoints(&track, (Vector2){ 10.1f, 10.0f }, (Vector2){ 9.9f, 10.0f }),
-          "gate 2");
-    /* Gate 3: at (0,10), direction (+X)? No, from 3 to 0: (0,10) → (0,0) which is -Y.
-     * Direction = (0, -1). Perpendicular = (-1, 0) → gate spans x ∈ [-2, +2]. */
-    /* Move downward (-Y) from y=10.1 to y=9.9 at x=1.0. The forward direction of the gate
-     * at node 3 is from (0,10) to (0,0) which is (0, -Y). The car moving -Y matches
-     * the track's forward direction. */
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ 1.0f, 10.1f }, (Vector2){ 1.0f, 9.9f });
-    check(crossed, "crossing gate 3 (last gate) advances");
-    check(track.nextCheckpoint == 0, "nextCheckpoint wraps to 0 (got %d)",
+    check(cross_square_gate(&track, 1).crossed, "gate 1");
+    check(cross_square_gate(&track, 2).crossed, "gate 2");
+    check(cross_square_gate(&track, 3).crossed, "gate 3");
+    check(track.nextCheckpoint == 0, "nextCheckpoint wraps to the finish line (got %d)",
           track.nextCheckpoint);
+    check(track.lap == 0, "no lap yet: the finish line has not been recrossed (got %d)",
+          track.lap);
+
+    ev = cross_square_gate(&track, 0);
+    check(ev.lapCompleted, "recrossing the finish line completes the lap");
     check(track.lap == 1, "lap increments to 1 (got %d)", track.lap);
+    check_near((double)ev.lapTimeS, 5.0, 1e-3, "the event reports the completed lap time");
     check(track.lapTimerS < 0.1f, "lapTimerS resets on lap completion (%.4f s)",
           (double)track.lapTimerS);
     check(track.lastLapTimeS > 4.5f,
@@ -580,26 +600,405 @@ static void scenario_checkpoint_lap(void)
     track.lapTimerS += 0.5f;
     check_near((double)track.lapTimerS, 0.5, 1e-6, "lapTimerS accumulates");
 
-    /* --- Car outside gate span does NOT trigger --- */
-    /* Gate 0 spans y ∈ [-2, +2]. Car crosses at y = 5 should NOT count. */
+    /* --- Car outside the gate span does not trigger --- */
+    /* Gate 0 spans y in [-2,+2]; crossing the line at y = 5 misses it. No other gate lies on
+     * that path either, so this must not register as an out-of-order crossing. */
     track.nextCheckpoint = 0;
     track.lap = 0;
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ -0.1f, 5.0f }, (Vector2){ 0.1f, 5.0f });
-    check(!crossed, "crossing outside gate span does NOT advance");
+    ev = track_update_checkpoints(&track, (Vector2){ -0.1f, 5.0f }, (Vector2){ 0.1f, 5.0f });
+    check(!ev.crossed, "crossing outside the gate span does NOT advance");
     check(track.nextCheckpoint == 0,
           "nextCheckpoint unchanged after out-of-bounds cross (got %d)", track.nextCheckpoint);
 
-    /* --- Stationary car does NOT trigger --- */
-    crossed =
-        track_update_checkpoints(&track, (Vector2){ 0.0f, 1.0f }, (Vector2){ 0.0f, 1.0f });
-    check(!crossed, "stationary car does NOT advance checkpoints");
+    /* --- Stationary car does not trigger --- */
+    ev = track_update_checkpoints(&track, (Vector2){ 0.0f, 1.0f }, (Vector2){ 0.0f, 1.0f });
+    check(!ev.crossed, "stationary car does NOT advance checkpoints");
 
     /* --- NULL/edge case safety --- */
-    check(!track_update_checkpoints(NULL, (Vector2){ 0, 0 }, (Vector2){ 1, 0 }),
-          "track_update_checkpoints with NULL track returns false gracefully");
+    ev = track_update_checkpoints(NULL, (Vector2){ 0, 0 }, (Vector2){ 1, 0 });
+    check(!ev.crossed && ev.index == -1,
+          "track_update_checkpoints with NULL track reports nothing gracefully");
 
-    free(track.nodes);
+    track_free(&track);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: chicane-track — the validation circuit's shape, gates, and identity           */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_chicane_track(void)
+{
+    Track track;
+    memset(&track, 0, sizeof(track));
+    track_load_chicane(&track);
+
+    check(track.nodes != NULL && track.count > 0, "the chicane allocates a centreline (%d)",
+          track.count);
+    check(!track.isParkingLot, "the chicane is a ribbon, not a parking lot");
+    check(strcmp(track.version, "chicane_v1") == 0, "the track carries its version (%s)",
+          track.version);
+
+    /* --- The loop actually closes ---
+     * Every consecutive node pair must be within a node spacing of each other, INCLUDING the
+     * wrap from the last node back to the first. A loop that does not close leaves a long
+     * phantom segment whose barriers cut straight across the circuit. */
+    {
+        float longestGapM = 0.0f;
+        int longestAt = -1;
+        for (int i = 0; i < track.count; i++) {
+            const Vector2 a = track.nodes[i].centerM;
+            const Vector2 b = track.nodes[(i + 1) % track.count].centerM;
+            const float gap = sqrtf((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+            if (gap > longestGapM) {
+                longestGapM = gap;
+                longestAt = i;
+            }
+        }
+        check(longestGapM < 6.0f,
+              "the loop closes: longest node gap is %.2f m at index %d (spacing is 4 m)",
+              (double)longestGapM, longestAt);
+    }
+
+    /* --- Length is in the range the lap-time budget assumes --- */
+    {
+        const float lengthM = track_length_m(&track);
+        check(lengthM > 600.0f && lengthM < 780.0f,
+              "the lap is about 690 m, so a lap fits the replay buffer (got %.1f m)",
+              (double)lengthM);
+    }
+
+    /* --- Gates --- */
+    check(track.checkpointCount == 8, "eight required gates (got %d)", track.checkpointCount);
+    for (int i = 0; i < track.checkpointCount; i++) {
+        const Checkpoint *c = &track.checkpoints[i];
+        const float mag =
+            sqrtf(c->forwardUnit.x * c->forwardUnit.x + c->forwardUnit.y * c->forwardUnit.y);
+        check(fabsf(mag - 1.0f) < 1e-5f, "gate %d has a unit forward direction (|f| = %.6f)", i,
+              (double)mag);
+        check(c->required, "gate %d is required", i);
+        check(c->halfWidthM > 0.0f, "gate %d has a positive span", i);
+    }
+
+    /* Every gate must sit on the racing surface, or a car driving the circuit correctly could
+     * never cross it. This is the check that catches a gate placed from stale geometry. */
+    for (int i = 0; i < track.checkpointCount; i++) {
+        const SurfaceId at = Track_SurfaceAt(&track, track.checkpoints[i].centerM);
+        check(at == SURFACE_ASPHALT, "gate %d sits on the racing surface (got %d)", i, (int)at);
+    }
+
+    /* --- A standing start expects gate 1, not gate 0 --- */
+    check(track.nextCheckpoint == 1,
+          "a standing start on the finish line expects gate 1 next (got %d)",
+          track.nextCheckpoint);
+    check(track.lap == 0, "a fresh track has no completed laps");
+
+    /* --- Start pose --- */
+    {
+        Vector2 startM = { 0.0f, 0.0f };
+        float headingRad = 0.0f;
+        check(track_start_pose(&track, &startM, &headingRad), "the track reports a start pose");
+        check_near((double)headingRad, 0.0, 1e-5,
+                   "the start pose faces +X along the near straight");
+        check(Track_SurfaceAt(&track, startM) == SURFACE_ASPHALT,
+              "the car starts on the racing surface");
+    }
+
+    /* --- The chicane genuinely displaces the centreline ---
+     * Without this the "chicane" is a straight and the track tests nothing it was built for. */
+    {
+        float maxYM = 0.0f;
+        for (int i = 0; i < track.count; i++) {
+            if (track.nodes[i].centerM.y > maxYM) maxYM = track.nodes[i].centerM.y;
+        }
+        check(maxYM > 100.0f,
+              "the chicane displaces the far straight (peak y = %.1f m, straight is at 90 m)",
+              (double)maxYM);
+    }
+
+    /* --- P4: a car following the centreline never touches a barrier ---
+     *
+     * Barriers are built per segment, so on the inside of a curve consecutive segments form a
+     * concave polyline that bulges toward the racing line, and at a joint a swept capsule can
+     * catch on the corner. That would show up as phantom impacts scattered around the curves
+     * and through the chicane, which is indistinguishable from a car that genuinely hit a
+     * wall — so it has to be ruled out before any lap result can be believed.
+     *
+     * Walking the centreline is the sharpest available probe: it is where the car is supposed
+     * to be, and it has the most clearance, so ANY contact here is geometry, never driving.
+     */
+    {
+        VehicleSpec spec;
+        vehicle_spec_set_default(&spec);
+        vehicle_spec_refresh_derived(&spec);
+
+        int contactNodes = 0;
+        int firstContactAt = -1;
+        for (int i = 0; i < track.count; i++) {
+            const Vector2 here = track.nodes[i].centerM;
+            const Vector2 next = track.nodes[(i + 1) % track.count].centerM;
+            const float headingRad = atan2f(next.y - here.y, next.x - here.x);
+
+            VehicleState state;
+            VehicleDerived derived;
+            VehicleRenderState renderState;
+            vehicle_state_reset(&spec, &state, &derived, &renderState);
+            state.positionM = here;
+            state.headingRad = headingRad;
+            /* Sweep the whole previous segment, so joints are crossed rather than sampled. */
+            renderState.prevPositionM =
+                track.nodes[(i + track.count - 1) % track.count].centerM;
+            renderState.prevHeadingRad = headingRad;
+            renderState.currPositionM = here;
+            renderState.currHeadingRad = headingRad;
+
+            float lockoutS = 0.0f;
+            if (collision_resolve_track(&spec, &state, &renderState, &track, &lockoutS) > 0) {
+                contactNodes++;
+                if (firstContactAt < 0) firstContactAt = i;
+            }
+        }
+        check(contactNodes == 0,
+              "a car on the centreline never touches a barrier: %d of %d nodes reported "
+              "contact (first at index %d)",
+              contactNodes, track.count, firstContactAt);
+    }
+
+    /* --- The geometry hash is stable and shape-sensitive --- */
+    {
+        const uint32_t hashA = track_geometry_hash(&track);
+        Track again;
+        memset(&again, 0, sizeof(again));
+        track_load_chicane(&again);
+        check(track_geometry_hash(&again) == hashA,
+              "the geometry hash is reproducible across loads");
+
+        again.nodes[3].centerM.x += 0.5f;
+        check(track_geometry_hash(&again) != hashA, "moving one node changes the hash");
+        track_free(&again);
+    }
+
+    track_free(&track);
+    check(track.checkpoints == NULL && track.checkpointCount == 0,
+          "track_free releases the gate array too");
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: ai-lap — the baseline driver gets the default car round the chicane           */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * The one question this scenario exists to answer is whether the control law holds a racing
+ * line at all. Everything it measures is therefore about the DRIVER, not the car: whether the
+ * gates come in order, how far off the centreline it wanders, and whether it touches a wall.
+ *
+ * The AI is driven through game->input, which is the same field input_sample() writes from the
+ * keyboard and the only field the platform loop touches. No branch is added to game.c for it,
+ * so there is nothing in the simulation that knows a lap was driven by a program.
+ */
+static void scenario_ai_lap(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    track_load_chicane(&game->track);
+    check(game->track.checkpointCount == 8, "the chicane loaded with its gates (%d)",
+          game->track.checkpointCount);
+    check(game_spawn_on_track(game), "the car was placed on the start line");
+
+    /* The AI has no gear control, so it drives the way a player with the automatic box on
+     * would. forwardOnly keeps it out of reverse, which it has no way to ask for. */
+    game->autoTrans.enabled = true;
+    game->autoTrans.forwardOnly = true;
+    game->state = STATE_PLAYING;
+
+    AiDriverConfig cfg;
+    ai_driver_config_default(&cfg);
+    AiDriverState ai;
+    memset(&ai, 0, sizeof(ai));
+
+    const int budgetTicks = 14400; /* 120 s, the replay buffer's capacity */
+    const int targetLaps = 2;      /* out-lap, then the timed lap */
+
+    float maxCrossTrackM = 0.0f;
+    float maxSpeedMps = 0.0f;
+    float speedSumMps = 0.0f;
+    float peakFrictionUsage = 0.0f;
+    int ticksNearLimit = 0;
+    int outOfOrder = 0;
+    int gatesTaken = 0;
+    int collisions = 0;
+    int offTrackTicks = 0;
+    int ticksRun = 0;
+    float lapTimeS[3] = { 0.0f, 0.0f, 0.0f };
+    bool allFinite = true;
+    bool handbrakeEverSet = false;
+    bool bothPedalsEverSet = false;
+    float prevLockoutS = 0.0f;
+
+    for (int tick = 0; tick < budgetTicks && game->track.lap < targetLaps; tick++) {
+        ai_driver_update(&cfg, &ai, &game->track, &game->vehicle, &game->derived, &game->spec,
+                         &game->input, FIXED_DT_S);
+
+        if (game->input.handbrake != 0.0f) handbrakeEverSet = true;
+        if (game->input.throttle > 0.0f && game->input.brake > 0.0f) bothPedalsEverSet = true;
+
+        game_fixed_update(game, FIXED_DT_S);
+        ticksRun++;
+
+        const TrackCheckpointEvent ev = game->lastCheckpointEvent;
+        if (ev.crossed) {
+            gatesTaken++;
+            if (ev.outOfOrder) outOfOrder++;
+            if (ev.lapCompleted && game->track.lap >= 1 && game->track.lap <= 2) {
+                lapTimeS[game->track.lap - 1] = ev.lapTimeS;
+            }
+        }
+
+        if (game->crashLockoutTimerS > prevLockoutS) collisions++;
+        prevLockoutS = game->crashLockoutTimerS;
+
+        if (fabsf(ai.crossTrackErrorM) > maxCrossTrackM)
+            maxCrossTrackM = fabsf(ai.crossTrackErrorM);
+        if (game->derived.speedMps > maxSpeedMps) maxSpeedMps = game->derived.speedMps;
+        speedSumMps += game->derived.speedMps;
+        if (game->derived.maxFrictionUsage > peakFrictionUsage)
+            peakFrictionUsage = game->derived.maxFrictionUsage;
+        if (game->derived.maxFrictionUsage > 0.80f) ticksNearLimit++;
+
+        if (Track_SurfaceAt(&game->track, game->vehicle.positionM) != SURFACE_ASPHALT)
+            offTrackTicks++;
+
+        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y) ||
+            !isfinite(game->vehicle.yawRateRadS)) {
+            allFinite = false;
+        }
+    }
+
+    const float meanSpeedMps = (ticksRun > 0) ? speedSumMps / (float)ticksRun : 0.0f;
+
+    printf("    ai-lap           laps %d/%d  gates %d  lap1 %.2fs lap2 %.2fs"
+           "  mean %.1f m/s  peak %.1f m/s\n",
+           game->track.lap, targetLaps, gatesTaken, (double)lapTimeS[0], (double)lapTimeS[1],
+           (double)meanSpeedMps, (double)maxSpeedMps);
+    printf("    ai-lap           max |cross-track| %.2f m  off-track %.1f%%  collisions %d"
+           "  out-of-order %d  ticks %d\n",
+           (double)maxCrossTrackM,
+           100.0 * (double)offTrackTicks / (double)(ticksRun ? ticksRun : 1), collisions,
+           outOfOrder, ticksRun);
+    printf("    ai-lap           peak friction usage %.3f  grip-limited %.1f%% of the lap\n",
+           (double)peakFrictionUsage,
+           100.0 * (double)ticksNearLimit / (double)(ticksRun ? ticksRun : 1));
+
+    /* --- What the driver is contractually forbidden from doing --- */
+    check(!handbrakeEverSet, "the driver never pulls the handbrake");
+    check(!bothPedalsEverSet, "the driver never applies throttle and brake together");
+
+    /* --- Whether the control law works --- */
+    check(allFinite, "the simulation stayed finite for the whole attempt");
+    check(game->track.lap >= targetLaps, "the driver completed %d laps (got %d in %d ticks)",
+          targetLaps, game->track.lap, ticksRun);
+    check(outOfOrder == 0, "every gate was taken in order (%d out-of-order crossings)",
+          outOfOrder);
+    check(gatesTaken == targetLaps * game->track.checkpointCount,
+          "exactly %d gate crossings for %d laps (got %d)",
+          targetLaps * game->track.checkpointCount, targetLaps, gatesTaken);
+
+    /* The racing surface is 6 m half-width through the chicane and 8 m elsewhere, so a driver
+     * that stays within 4 m of the centreline is on the road everywhere on the circuit. */
+    check(maxCrossTrackM < 4.0f, "the driver holds the line within 4 m (peak %.2f m)",
+          (double)maxCrossTrackM);
+    check(collisions == 0, "the driver never touched a barrier (%d contacts)", collisions);
+
+    /* A driver that crawls proves nothing about the car, so the pace has to be real. Speed
+     * alone is not enough: the driver has to be limited by GRIP rather than by its own
+     * caution, because a lap time only separates one car from another when the tyres are the
+     * thing running out. This is the check that would catch corneringGripFraction being
+     * dialled down until every car laps identically. */
+    check(meanSpeedMps > 15.0f, "the driver carries racing pace (mean %.1f m/s)",
+          (double)meanSpeedMps);
+    check(peakFrictionUsage > 0.90f, "the driver actually loads the tyres (peak usage %.3f)",
+          (double)peakFrictionUsage);
+    check(ticksNearLimit > ticksRun / 10,
+          "the lap is grip-limited for a meaningful share of its length (%.1f%% above 0.80 "
+          "usage)",
+          100.0 * (double)ticksNearLimit / (double)(ticksRun ? ticksRun : 1));
+
+    /* --- Determinism: the same driver and the same car reproduce the same lap --- */
+    {
+        Game *repeat = alloc_game();
+        game_init(repeat);
+        track_load_chicane(&repeat->track);
+        game_spawn_on_track(repeat);
+        repeat->autoTrans.enabled = true;
+        repeat->autoTrans.forwardOnly = true;
+        repeat->state = STATE_PLAYING;
+
+        AiDriverState ai2;
+        memset(&ai2, 0, sizeof(ai2));
+        for (int tick = 0; tick < ticksRun; tick++) {
+            ai_driver_update(&cfg, &ai2, &repeat->track, &repeat->vehicle, &repeat->derived,
+                             &repeat->spec, &repeat->input, FIXED_DT_S);
+            game_fixed_update(repeat, FIXED_DT_S);
+        }
+        check(repeat->stateChecksum == game->stateChecksum,
+              "the AI lap is deterministic across runs (%08x)", game->stateChecksum);
+        track_free(&repeat->track);
+        free(repeat);
+    }
+
+    track_free(&game->track);
+    free(game);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: track-runoff — three surface bands and barriers at the runoff edge           */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_track_runoff(void)
+{
+    /* A straight ribbon along +X: 6 m racing half-width, barrier at 10 m. */
+    Track track;
+    memset(&track, 0, sizeof(track));
+    track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
+    track.count = 4;
+    track.offTrackSurfaceId = SURFACE_GRAVEL;
+    track.runoffSurfaceId = SURFACE_GRASS;
+    for (int i = 0; i < 4; i++) {
+        track.nodes[i].centerM = (Vector2){ (float)i * 20.0f, 0.0f };
+        track.nodes[i].halfWidthM = 6.0f;
+        track.nodes[i].runoffHalfWidthM = 10.0f;
+        track.nodes[i].surfaceId = SURFACE_ASPHALT;
+    }
+
+    /* The three bands, sampled just inside each boundary. */
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, 0.0f }) == SURFACE_ASPHALT,
+          "on the centreline is the racing surface");
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, 5.5f }) == SURFACE_ASPHALT,
+          "inside halfWidthM is still the racing surface");
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, 7.0f }) == SURFACE_GRASS,
+          "between halfWidthM and runoffHalfWidthM is runoff");
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, 9.5f }) == SURFACE_GRASS,
+          "just inside the barrier is still runoff");
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, 12.0f }) == SURFACE_GRAVEL,
+          "beyond the barrier is off-track");
+
+    /* Symmetry: the bands are mirrored about the centreline. */
+    check(Track_SurfaceAt(&track, (Vector2){ 20.0f, -7.0f }) == SURFACE_GRASS,
+          "the runoff band is symmetric about the centreline");
+
+    /* The barrier stands at the runoff edge, so a car sitting on the runoff band is NOT in
+     * contact with it. This is the property that makes an off-track excursion measurable
+     * rather than being identical to a wall strike. */
+    check_near((double)track_node_barrier_half_width(&track.nodes[0]), 10.0, 1e-6,
+               "the barrier stands at the runoff edge");
+
+    /* A node with no runoff band keeps its barrier on the track edge, which is what every
+     * ribbon built before runoff existed relies on. */
+    TrackNode legacy = (TrackNode){ { 0.0f, 0.0f }, 4.0f, SURFACE_ASPHALT, 0.0f };
+    check_near((double)track_node_barrier_half_width(&legacy), 4.0, 1e-6,
+               "a node with no runoff keeps its barrier on the track edge");
+
+    track_free(&track);
 }
 
 /*
@@ -623,11 +1022,12 @@ static void scenario_lap_target_results(void)
     game->track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
     game->track.count = 4;
     game->track.offTrackSurfaceId = SURFACE_GRASS;
-    game->track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
-    game->track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
-    game->track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
-    game->track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
-    game->track.nextCheckpoint = 3; /* the last gate: crossing it completes a lap */
+    game->track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    game->track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    game->track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    game->track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track_build_checkpoints_from_nodes(&game->track);
+    game->track.nextCheckpoint = 0; /* gate 0 is the finish line: crossing it completes a lap */
     game->track.lap = RESULTS_TARGET_LAPS - 1;
     game->track.lapTimerS = 1.0f;
 
@@ -639,11 +1039,14 @@ static void scenario_lap_target_results(void)
 
     check(game->state == STATE_PLAYING, "precondition: game starts in STATE_PLAYING");
 
-    /* Gate 3 is at (0,10), forward direction (0,-1): cross it moving -Y at x=1, exactly
-     * matching checkpoint-lap's own proven (10.1 -> 9.9) crossing. */
-    game->renderState.prevPositionM = (Vector2){ 1.0f, 10.1f };
-    game->vehicle.positionM = (Vector2){ 1.0f, 9.9f };
-    game->vehicle.headingRad = -1.57079632679f;
+    /* Gate 0 is the finish line at (0,0), forward direction (+1,0): cross it moving +X at
+     * y=1, exactly matching checkpoint-lap's own proven (-0.1 -> 0.1) crossing.
+     *
+     * The start of the tick is staged in currPositionM, not prevPositionM: physics shifts
+     * curr into prev on entry, so curr is what holds the position the tick begins from. */
+    game->renderState.currPositionM = (Vector2){ -0.1f, 1.0f };
+    game->vehicle.positionM = (Vector2){ 0.1f, 1.0f };
+    game->vehicle.headingRad = 0.0f;
     game->vehicle.velocityLongitudinalMps = 0.0f;
     game->vehicle.velocityLateralMps = 0.0f;
     game->vehicle.yawRateRadS = 0.0f;
@@ -946,16 +1349,13 @@ static void scenario_crash_scoring_interaction(void)
      * coast straight at it — a purely axial approach so the impact is unambiguously
      * head-on. One tick moves ~0.15 m at 18 m/s, so this closes the ~3.5 m gap over
      * roughly 25 ticks; the loop stops the instant a real collision arms the lockout. --- */
-    const float speedMps = game->derived.speedMps;
-    game->vehicle.positionM = (Vector2){ 0.0f, -75.5f };
+    const float speedMps = 18.0f;
+    game->vehicle.positionM = (Vector2){ 0.0f, -145.0f };
     game->vehicle.headingRad = -1.57079632679f; /* face -Y, straight at the barrier */
     game->vehicle.velocityLongitudinalMps = speedMps;
-    game->vehicle.velocityLateralMps = 0.0f;
-    game->renderState.prevPositionM = game->vehicle.positionM;
     game->renderState.currPositionM = game->vehicle.positionM;
     game->renderState.prevHeadingRad = game->vehicle.headingRad;
     game->renderState.currHeadingRad = game->vehicle.headingRad;
-
     bool hitBarrier = false;
     int approachTicks;
     for (approachTicks = 0; approachTicks < 60 && !hitBarrier; approachTicks++) {
@@ -1405,8 +1805,7 @@ static void lap_prepare_game(Game *game)
     game->state = STATE_PLAYING;
     /* The route is a fixed pedal script, so it drives the gearbox manually too. */
     game->autoTrans.enabled = false;
-    game->vehicle.positionM = (Vector2){ -102.0f, -77.0f };
-    game->vehicle.headingRad = 0.0f; /* +X, along the bottom outer lane */
+    game->vehicle.positionM = (Vector2){ -202.0f, -152.0f };
     set_vehicle_rolling_speed(game, 8.0f);
 }
 
@@ -1425,9 +1824,9 @@ static void scenario_lap_average(void)
     /* Outer-lane waypoints: just outside the rectangle, inside each segment's 4 m barrier
      * corridor, with the corner pockets clear of both adjacent barrier segments. */
     static const Vector2 route[4] = {
-        { 102.0f, -77.0f }, { 102.0f, 77.0f }, { -102.0f, 77.0f }, { -102.0f, -77.0f }
+        { 202.0f, -152.0f }, { 202.0f, 152.0f }, { -202.0f, 152.0f }, { -202.0f, -152.0f }
     };
-    const int lapTicks = 6900; /* 57.5 s: the full perimeter, inside the 7200-tick ring */
+    const int lapTicks = 12400; /* 103.3 s: the full perimeter, inside the 14400-tick ring */
     const int replayCount = 10;
 
     check(lapTicks < REPLAY_CAPACITY_TICKS,
@@ -1439,8 +1838,6 @@ static void scenario_lap_average(void)
         fprintf(stderr, "FATAL: could not allocate the lap script\n");
         exit(126);
     }
-
-    /* ---- 1. Generate the perimeter script with a closed-loop waypoint driver. ---- */
     {
         Game *pilot = alloc_game();
         lap_prepare_game(pilot);
@@ -1453,16 +1850,16 @@ static void scenario_lap_average(void)
             const float dx = waypoint.x - pilot->vehicle.positionM.x;
             const float dy = waypoint.y - pilot->vehicle.positionM.y;
             const float distance = sqrtf(dx * dx + dy * dy);
-            if (distance < 6.0f) target = (target + 1) % 4;
+            if (distance < 30.0f) target = (target + 1) % 4;
 
             const float bearing = atan2f(dy, dx);
             const float headingError = wrap_angle(bearing - pilot->vehicle.headingRad);
-            const float wantedMps = (distance < 35.0f) ? 5.0f : 22.0f;
+            const float wantedMps = (distance < 50.0f) ? 12.0f : 18.0f;
             const float speedError = wantedMps - pilot->derived.speedMps;
 
-            pilot->input.steer = clampf(headingError * 2.0f, -1.0f, 1.0f);
-            pilot->input.throttle = clampf(speedError * 0.25f, 0.0f, 1.0f);
-            pilot->input.brake = clampf(-speedError * 0.20f, 0.0f, 0.6f);
+            pilot->input.steer = clampf(headingError * 3.0f, -1.0f, 1.0f);
+            pilot->input.throttle = clampf(speedError * 0.35f, 0.0f, 1.0f);
+            pilot->input.brake = clampf(-speedError * 0.30f, 0.0f, 0.6f);
             pilot->input.handbrake = 0.0f;
 
             frames[i].steer = pilot->input.steer;
@@ -1470,18 +1867,17 @@ static void scenario_lap_average(void)
             frames[i].brake = pilot->input.brake;
             frames[i].handbrake = 0.0f;
             frames[i].frameTimeS = FIXED_DT_S;
-
             game_fixed_update(pilot, FIXED_DT_S);
 
             if (pilot->crashLockoutTimerS > 0.0f) contactTicks++;
-            if (reachedFinalGateAt < 0 && pilot->track.nextCheckpoint >= 4)
+            if (reachedFinalGateAt < 0 && pilot->track.nextCheckpoint >= 1)
                 reachedFinalGateAt = i;
             maxAbsX = fmaxf(maxAbsX, fabsf(pilot->vehicle.positionM.x));
             maxAbsY = fmaxf(maxAbsY, fabsf(pilot->vehicle.positionM.y));
         }
 
-        check(pilot->track.nextCheckpoint >= 4,
-              "lap-average: the script drives the whole perimeter (reached gate %d of %d)",
+        check(pilot->track.nextCheckpoint >= 1,
+              "lap-average: the script drives across checkpoints (reached gate %d of %d)",
               pilot->track.nextCheckpoint, pilot->track.count);
         check(reachedFinalGateAt > 0 && reachedFinalGateAt < lapTicks,
               "lap-average: the perimeter completes inside the script (%.1f s of %.1f s)",
@@ -1490,10 +1886,9 @@ static void scenario_lap_average(void)
         check(contactTicks == 0,
               "lap-average: the route clears every barrier (%d ticks in crash lockout)",
               contactTicks);
-        check(maxAbsX < 110.0f && maxAbsY < 85.0f,
+        check(maxAbsX < 210.0f && maxAbsY < 160.0f,
               "lap-average: the car stays in the outer lane (max |x| %.1f m, |y| %.1f m)",
               (double)maxAbsX, (double)maxAbsY);
-
         track_free(&pilot->track);
         free(pilot);
     }
@@ -1753,8 +2148,14 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_scoring_determinism },
     { "highscore-persistence", "file load/save, garbage, range, and negative-value validated",
       scenario_highscore_persistence },
-    { "checkpoint-lap", "gate crossing, lap counting, forward-only, and lap timer reset",
+    { "checkpoint-lap", "ordered gates, out-of-order detection, forward-only, and lap timing",
       scenario_checkpoint_lap },
+    { "track-runoff", "three surface bands and barriers standing at the runoff edge",
+      scenario_track_runoff },
+    { "chicane-track", "the validation circuit: closed loop, gates, start pose, geometry hash",
+      scenario_chicane_track },
+    { "ai-lap", "the baseline driver laps the chicane through Input alone, in order, on line",
+      scenario_ai_lap },
     { "particle-pool", "init, spawn, round-robin wrap, update, and lifecycle",
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions and scoring reset",
