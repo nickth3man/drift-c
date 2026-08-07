@@ -80,13 +80,13 @@ typedef struct GameRunConfig GameRunConfig;
 
 /* ------------------------------------------------------------------------------------- */
 
-#define GAME_ENTRY_POINTS                                                                  \
-    ENTRY(game_init, void, Game *)                /* first-time setup */                   \
-    ENTRY(game_pre_reload, void, Game *)          /* release module-owned resources */     \
-    ENTRY(game_post_reload, void, Game *)         /* re-acquire them */                    \
-    ENTRY(game_fixed_update, void, Game *, float) /* one fixed step */                     \
-    ENTRY(game_draw, void, Game *, float)         /* render with interpolation alpha */    \
-    ENTRY(game_shutdown, void, Game *)                                                     \
+#define GAME_ENTRY_POINTS                                                                 \
+    ENTRY(game_init, void, Game *)                /* first-time setup */                  \
+    ENTRY(game_pre_reload, void, Game *)          /* release module-owned resources */    \
+    ENTRY(game_post_reload, void, Game *)         /* re-acquire them */                   \
+    ENTRY(game_fixed_update, void, Game *, float) /* one fixed step */                    \
+    ENTRY(game_draw, void, Game *, float)         /* render with interpolation alpha */   \
+    ENTRY(game_shutdown, void, Game *)                                                    \
     /* select track and car, then place the car on the start line. The platform layer   \
      * cannot do this itself: track and vehicle code live in the reloadable module. */ \
     ENTRY(game_configure_run, bool, Game *, const GameRunConfig *)

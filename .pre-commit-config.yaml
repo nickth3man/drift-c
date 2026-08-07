@@ -1,0 +1,45 @@
+# Catches formatting at commit time instead of in review or in CI.
+#
+#   pip install pre-commit && pre-commit install     once, per clone
+#   pre-commit run --all-files                       check everything now
+#   git commit --no-verify                           bypass, when you mean to
+#
+# The revs are pinned to the exact versions this project formats with:
+#
+#   clang-format 22.1.8   the version in MSYS2 UCRT64 (mingw-w64-ucrt-x86_64-clang-tools-extra)
+#   ruff 0.15.20          the version pinned in requirements-dev.txt
+#
+# Keep those three in step. A hook one minor version off the toolchain will reformat files
+# that `make format-check` considers correct, and the two will fight on every commit.
+
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.8
+    hooks:
+      - id: clang-format
+        # Only our C. third_party/ is vendored verbatim and must never be reformatted.
+        files: ^(src|tests|fuzz)/.*\.(c|h)$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^third_party/
+      - id: end-of-file-fixer
+        exclude: ^(third_party/|tests/visual/baseline/)
+      - id: check-merge-conflict
+      # Deliberately NOT mixed-line-ending. It inspects the worktree, where core.autocrlf=true
+      # legitimately produces CRLF on Windows, so it "fixes" all 300 files on every run and
+      # git normalises them straight back. .gitattributes owns line endings here, at the layer
+      # that actually decides what gets committed.
+      - id: check-yaml
+      - id: check-added-large-files
+        # Telemetry CSVs and scene baselines are legitimately chunky; run evidence is not.
+        args: [--maxkb=2048]

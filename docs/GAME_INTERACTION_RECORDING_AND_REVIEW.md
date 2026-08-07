@@ -1,8 +1,8 @@
 # Research Report & Architecture Proposal: Agent-Operated Game Interaction Recording & Review
 
-**Author:** Antigravity AI  
-**Scope:** Deep Research across GitHub Awesome Lists (`calinou/awesome-gamedev`, `stevinz/awesome-game-engine-dev`, `FronkonGames/Awesome-Gamedev`, `AwesomeCppGameDev`), Reddit, and StackOverflow for Agent-Usable Game Recording, Telemetry, and Time-Travel Debugging Systems  
-**Curated Repositories Researched:** `google/perfetto`, `baldurk/renderdoc`, `rr-debugger/rr`, `clementgallet/libTAS`, `univrsal/input-overlay`, `epezent/implot`, `rerun-io/rerun`, `wolfpld/tracy`, `Palanteer`  
+**Author:** Antigravity AI
+**Scope:** Deep Research across GitHub Awesome Lists (`calinou/awesome-gamedev`, `stevinz/awesome-game-engine-dev`, `FronkonGames/Awesome-Gamedev`, `AwesomeCppGameDev`), Reddit, and StackOverflow for Agent-Usable Game Recording, Telemetry, and Time-Travel Debugging Systems
+**Curated Repositories Researched:** `google/perfetto`, `baldurk/renderdoc`, `rr-debugger/rr`, `clementgallet/libTAS`, `univrsal/input-overlay`, `epezent/implot`, `rerun-io/rerun`, `wolfpld/tracy`, `Palanteer`
 
 ---
 

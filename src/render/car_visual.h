@@ -195,10 +195,9 @@ typedef struct {
     float splitterWidthM;    /* [rule] splitter width from front aero magnitude */
     float canardStrength;    /* [rule] 0..1; reads |aeroLiftCoefFront| × aeroRefAreaFrontM2 */
     float mirrorOffsetM;
-    float exhaustBoreM; /* [rule] exhaust bore; reads engineDisplacementL */
-    int exhaustCount;   /* [rule] exhaust count 1..4; reads engineCylinders */
-    float
-        exhaustTransition;  /* [rule] 0..1 within-tier fraction; scales pipe bore in the raster
+    float exhaustBoreM;      /* [rule] exhaust bore; reads engineDisplacementL */
+    int exhaustCount;        /* [rule] exhaust count 1..4; reads engineCylinders */
+    float exhaustTransition; /* [rule] 0..1 within-tier fraction; scales pipe bore in the raster
                                        so count × bore² stays continuous across thresholds */
     float towHookDiameterM; /* [rule] presentation-gained race marker; reads raceDetailWeight */
     float towHookXM;        /* [rule] marker station clear of the L9 heading triangle */

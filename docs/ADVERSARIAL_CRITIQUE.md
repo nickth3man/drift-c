@@ -1,8 +1,8 @@
 # Deep Adversarial Critique: Drifty (Phase 2)
 
-**Evaluated Artifact:** `build/dev/drifty.exe` & `build/dev/game.dll`  
-**Evaluation Method:** Automated dynamic recording via `ffmpeg` (`recording_output/gameplay_full.mkv`), high-frequency screenshot extraction (`recording_output/frame_*.png`), animated GIF replay synthesis (`recording_output/gameplay_replay.gif`), interactive `computer` tool window automation, and Win32 key injection.  
-**Date:** August 6, 2026  
+**Evaluated Artifact:** `build/dev/drifty.exe` & `build/dev/game.dll`
+**Evaluation Method:** Automated dynamic recording via `ffmpeg` (`recording_output/gameplay_full.mkv`), high-frequency screenshot extraction (`recording_output/frame_*.png`), animated GIF replay synthesis (`recording_output/gameplay_replay.gif`), interactive `computer` tool window automation, and Win32 key injection.
+**Date:** August 6, 2026
 
 ---
 
@@ -22,7 +22,7 @@ graph TD
     A --> C[Top-Right Card: SCORE / BEST]
     A --> D[Bottom-Left HUD: SPEED / GEAR / RPM]
     A --> E[Bottom Hint Bar: Controls]
-    
+
     F[F1 Diagnostics] -. Collides .-> B
     F -. Collides .-> C
     G[F2 Physics Lab] -. Obscures .-> F
@@ -52,7 +52,7 @@ graph TD
 1. **Nearest-Neighbor Sprite Aliasing (`frame_006.png`, `frame_009.png`):**
    - The car body is rendered procedurally via `src/render/car_visual_raster.c`.
    - As the vehicle heading angle $\theta$ rotates away from cardinal axes ($0^\circ, 90^\circ, 180^\circ, 270^\circ$), nearest-neighbor sub-pixel rasterization causes mirror pixels, roof contours, and wheel shapes to stair-step and jitter rapidly frame-to-frame.
-   
+
 2. **Surface Boundary Hard Cutoffs (`frame_013.png`):**
    - The transition between dark asphalt grid tiles and green off-road grass is a zero-width hard color boundary line.
    - Driving onto grass generates no dust/dirt particles, surface tire discoloration, or edge blending effects.
