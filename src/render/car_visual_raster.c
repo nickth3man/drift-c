@@ -83,8 +83,8 @@ static bool pixel_inside_clip_hull(const RasterTarget *t, int x, int y)
     const float x0 = v->hull[station].xM;
     const float x1 = v->hull[station + 1].xM;
     const float u = (x1 > x0) ? clampf((xM - x0) / (x1 - x0), 0.0f, 1.0f) : 0.0f;
-    const float halfWidth = lerpf(v->hull[station].halfWidthM,
-                                  v->hull[station + 1].halfWidthM, u);
+    const float halfWidth =
+        lerpf(v->hull[station].halfWidthM, v->hull[station + 1].halfWidthM, u);
     return fabsf(yM) <= halfWidth;
 }
 
