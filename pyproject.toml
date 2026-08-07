@@ -39,5 +39,11 @@ select = [
 # they are run by path rather than as a package. The import genuinely cannot come first.
 "tools/telemetry/*.py" = ["E402"]
 
+# The SVG writer emits one element per f-string. Those literals are genuinely longer than
+# the limit and neither the formatter nor implicit concatenation improves them — splitting
+# `<text x=... y=... fill=... font-size=...>` across lines makes the markup harder to read,
+# not easier. Matched by basename so the ignore survives the file being moved.
+"**/record_gameplay.py" = ["E501"]
+
 [tool.ruff.format]
 quote-style = "double"

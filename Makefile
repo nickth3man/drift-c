@@ -28,6 +28,7 @@
 #   make DRIFTY_STRICT=1 ci   same, but a missing tool fails instead of skipping (what CI runs)
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
+#   make format-py        apply ruff to the Python   make lint-py       check only
 #   make lint             cppcheck                   make analyze       clang --analyze
 #   make fuzz             build and briefly run the libFuzzer targets (clang)
 #   make clean            remove every generated artifact
@@ -102,6 +103,7 @@ CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 CPPCHECK     := $(shell command -v cppcheck 2>/dev/null)
 GCOVR        := $(shell command -v gcovr 2>/dev/null)
 MAGICK       := $(shell command -v magick 2>/dev/null)
+RUFF         := $(shell command -v ruff 2>/dev/null)
 
 # A missing tool is advisory on a developer machine and fatal in CI. Without this, `make ci`
 # exits 0 having run almost nothing whenever a tool is absent, which is exactly the state a
@@ -228,7 +230,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
-        benchmark ci compile-commands format format-check lint analyze fuzz \
+        benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
@@ -247,6 +249,7 @@ info:
 	@echo "clang-format: $(if $(CLANG_FORMAT),$(CLANG_FORMAT),not installed)"
 	@echo "cppcheck    : $(if $(CPPCHECK),$(CPPCHECK),not installed)"
 	@echo "gcovr       : $(if $(GCOVR),$(GCOVR),not installed)"
+	@echo "ruff        : $(if $(RUFF),$(RUFF),not installed)"
 	@echo "magick      : $(if $(MAGICK),$(MAGICK),not installed)"
 
 # ------------------------------------------------------------- the source manifest, out --
@@ -379,6 +382,27 @@ else
 	@echo "format ok"
 endif
 
+# The Python half of the same two targets. Configuration lives in pyproject.toml; ruff is the
+# only third-party package this repository needs (requirements-dev.txt).
+
+format-py:
+ifeq ($(RUFF),)
+	@echo "ruff not installed. pip install -r requirements-dev.txt" >&2
+	@exit 1
+else
+	$(RUFF) check --fix .
+	$(RUFF) format .
+endif
+
+lint-py:
+ifeq ($(RUFF),)
+	$(call skip,lint-py: ruff not installed (pip install -r requirements-dev.txt).)
+else
+	$(RUFF) check .
+	$(RUFF) format --check .
+	@echo "python lint and format ok"
+endif
+
 lint:
 ifeq ($(CPPCHECK),)
 	$(call skip,lint: cppcheck not installed (pacman -S mingw-w64-ucrt-x86_64-cppcheck).)
@@ -417,10 +441,10 @@ else
 	fi
 endif
 
-verify-fast: format-check test
+verify-fast: format-check lint-py test
 	@echo "verify-fast: ok"
 
-verify: format-check lint analyze test-physics regression
+verify: format-check lint-py lint analyze test-physics regression
 	@echo "verify: ok"
 
 # ------------------------------------------------------------------------- sanitizers --
@@ -608,7 +632,7 @@ profile: windows-only
 
 # ------------------------------------------------------------------- aggregate check --
 
-ci: format-check lint analyze test-physics regression sanitize coverage
+ci: format-check lint-py lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
 ifdef DRIFTY_STRICT

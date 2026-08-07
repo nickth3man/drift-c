@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build one self-contained HTML report for a telemetry run.
 
-    python tools/telemetry/make_report.py artifacts/telemetry/scenario_skidpad.csv --out artifacts/report.html
+    python tools/telemetry/make_report.py \
+        artifacts/telemetry/scenario_skidpad.csv --out artifacts/report.html
     python tools/telemetry/make_report.py current.csv --baseline tests/baselines/skidpad.csv
     python tools/telemetry/make_report.py --dir artifacts/telemetry --out artifacts/report.html
 
@@ -75,8 +76,10 @@ def metrics_table(run: tc.Run, baseline: Optional[tc.Run]) -> str:
     rows = []
     for name in sorted(metrics):
         current_value = metrics[name]
-        cells = ["<td>%s</td>" % html.escape(name),
-                 '<td class="num">%s</td>' % format_value(current_value, name)]
+        cells = [
+            "<td>%s</td>" % html.escape(name),
+            '<td class="num">%s</td>' % format_value(current_value, name),
+        ]
         if baseline is not None:
             base_value = base_metrics.get(name)
             cells.append('<td class="num">%s</td>' % format_value(base_value, name))
@@ -84,17 +87,23 @@ def metrics_table(run: tc.Run, baseline: Optional[tc.Run]) -> str:
             if difference is None or difference.delta is None:
                 cells.append('<td class="num info">-</td><td class="info">-</td>')
             else:
-                verdict = ('<span class="fail">REVIEW</span>' if difference.breached
-                           else '<span class="pass">ok</span>')
-                cells.append('<td class="num">%+.6g</td><td>%s</td>'
-                             % (difference.current - difference.baseline, verdict))
+                verdict = (
+                    '<span class="fail">REVIEW</span>'
+                    if difference.breached
+                    else '<span class="pass">ok</span>'
+                )
+                cells.append(
+                    '<td class="num">%+.6g</td><td>%s</td>'
+                    % (difference.current - difference.baseline, verdict)
+                )
         rows.append("<tr>%s</tr>" % "".join(cells))
 
     headers = ["Metric", "Current"]
     if baseline is not None:
         headers += ["Baseline", "Delta", "Verdict"]
     return "<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>" % (
-        "".join("<th>%s</th>" % h for h in headers), "".join(rows)
+        "".join("<th>%s</th>" % h for h in headers),
+        "".join(rows),
     )
 
 
@@ -105,14 +114,21 @@ def column_table(run: tc.Run, baseline: Optional[tc.Run]) -> str:
     differences.sort(key=lambda d: (d.delta or 0.0) - (d.tolerance or 0.0), reverse=True)
     rows = []
     for difference in differences[:14]:
-        verdict = ('<span class="fail">breach</span>' if difference.breached
-                   else '<span class="pass">ok</span>')
+        verdict = (
+            '<span class="fail">breach</span>'
+            if difference.breached
+            else '<span class="pass">ok</span>'
+        )
         rows.append(
-            "<tr><td>%s</td><td class=\"num\">%.6g</td><td class=\"num\">%.6g</td>"
-            "<td class=\"num\">%s</td><td>%s</td></tr>"
-            % (html.escape(difference.name), difference.delta or 0.0,
-               difference.tolerance or 0.0,
-               "-" if difference.index is None else difference.index, verdict)
+            '<tr><td>%s</td><td class="num">%.6g</td><td class="num">%.6g</td>'
+            '<td class="num">%s</td><td>%s</td></tr>'
+            % (
+                html.escape(difference.name),
+                difference.delta or 0.0,
+                difference.tolerance or 0.0,
+                "-" if difference.index is None else difference.index,
+                verdict,
+            )
         )
     return (
         "<table><thead><tr><th>Column</th><th>Worst |delta|</th><th>Tolerance</th>"
@@ -125,13 +141,25 @@ def exact_table(run: tc.Run, baseline: Optional[tc.Run]) -> str:
         return ""
     rows = []
     for difference in tc.compare_exact(baseline, run):
-        verdict = ('<span class="fail">differs</span>' if difference.breached
-                   else '<span class="pass">identical</span>')
-        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            html.escape(difference.name), format_value(difference.baseline),
-            format_value(difference.current), verdict))
-    checksum = ('<span class="pass">identical</span>' if tc.checksum_matches(baseline, run)
-                else '<span class="info">differs (informational across toolchains)</span>')
+        verdict = (
+            '<span class="fail">differs</span>'
+            if difference.breached
+            else '<span class="pass">identical</span>'
+        )
+        rows.append(
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            % (
+                html.escape(difference.name),
+                format_value(difference.baseline),
+                format_value(difference.current),
+                verdict,
+            )
+        )
+    checksum = (
+        '<span class="pass">identical</span>'
+        if tc.checksum_matches(baseline, run)
+        else '<span class="info">differs (informational across toolchains)</span>'
+    )
     rows.append("<tr><td>state checksum</td><td>-</td><td>-</td><td>%s</td></tr>" % checksum)
     return (
         "<table><thead><tr><th>Exact comparison</th><th>Baseline</th><th>Current</th>"
@@ -145,23 +173,32 @@ def failures_section(failures_path: Optional[str]) -> str:
         return ""
     with open(failures_path, "r", encoding="utf-8", errors="replace") as handle:
         text = handle.read()
-    return ('<h2>Failing assertions</h2><div class="banner"><pre>%s</pre></div>'
-            % html.escape(text.strip()))
+    return '<h2>Failing assertions</h2><div class="banner"><pre>%s</pre></div>' % html.escape(
+        text.strip()
+    )
 
 
-def build_report(runs: List[tc.Run], baseline: Optional[tc.Run], failures: Optional[str],
-                 title: str) -> str:
+def build_report(
+    runs: List[tc.Run], baseline: Optional[tc.Run], failures: Optional[str], title: str
+) -> str:
     generated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     parts: List[str] = []
-    parts.append("<!doctype html><html><head><meta charset=\"utf-8\">")
-    parts.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
-    parts.append("<title>%s</title><style>%s</style></head><body>" % (html.escape(title),
-                                                                      PAGE_STYLE))
+    parts.append('<!doctype html><html><head><meta charset="utf-8">')
+    parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
+    parts.append(
+        "<title>%s</title><style>%s</style></head><body>" % (html.escape(title), PAGE_STYLE)
+    )
     parts.append("<h1>%s</h1>" % html.escape(title))
-    parts.append('<div class="sub">generated %s &middot; %d run(s)%s</div>'
-                 % (generated, len(runs),
-                    " &middot; baseline <code>%s</code>" % html.escape(baseline.path)
-                    if baseline is not None else ""))
+    parts.append(
+        '<div class="sub">generated %s &middot; %d run(s)%s</div>'
+        % (
+            generated,
+            len(runs),
+            " &middot; baseline <code>%s</code>" % html.escape(baseline.path)
+            if baseline is not None
+            else "",
+        )
+    )
 
     parts.append(failures_section(failures))
 
@@ -178,11 +215,15 @@ def build_report(runs: List[tc.Run], baseline: Optional[tc.Run], failures: Optio
             breaches += [d for d in tc.compare_columns(reference, run) if d.breached]
         banner_class = "banner ok" if not breaches else "banner"
         if reference is not None:
-            summary = ("no tolerance breaches against %s" % os.path.basename(reference.path)
-                       if not breaches else
-                       "%d comparison(s) outside tolerance" % len(breaches))
-            parts.append('<div class="%s">%s: %s</div>'
-                         % (banner_class, html.escape(run.name), html.escape(summary)))
+            summary = (
+                "no tolerance breaches against %s" % os.path.basename(reference.path)
+                if not breaches
+                else "%d comparison(s) outside tolerance" % len(breaches)
+            )
+            parts.append(
+                '<div class="%s">%s: %s</div>'
+                % (banner_class, html.escape(run.name), html.escape(summary))
+            )
 
         parts.append("<h2>%s &mdash; derived metrics</h2>" % html.escape(run.name))
         parts.append(metrics_table(run, reference))
@@ -203,8 +244,9 @@ def build_report(runs: List[tc.Run], baseline: Optional[tc.Run], failures: Optio
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("csv", nargs="*", help="telemetry CSVs to include")
     parser.add_argument("--dir", help="include every CSV in this directory")
     parser.add_argument("--baseline", help="baseline CSV to compare against")
@@ -215,8 +257,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     paths = list(args.csv)
     if args.dir:
-        paths += [os.path.join(args.dir, f) for f in sorted(os.listdir(args.dir))
-                  if f.endswith(".csv")]
+        paths += [
+            os.path.join(args.dir, f) for f in sorted(os.listdir(args.dir)) if f.endswith(".csv")
+        ]
     if not paths:
         parser.error("give at least one CSV, or --dir")
 
@@ -229,8 +272,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(args.out, "w", encoding="utf-8") as handle:
         handle.write(build_report(runs, baseline, args.failures, args.title))
 
-    print("wrote %s (%d run(s), %d chart(s) each)"
-          % (args.out, len(runs), len(plot_telemetry.chart_definitions(runs[0], baseline))))
+    print(
+        "wrote %s (%d run(s), %d chart(s) each)"
+        % (args.out, len(runs), len(plot_telemetry.chart_definitions(runs[0], baseline)))
+    )
     return 0
 
 

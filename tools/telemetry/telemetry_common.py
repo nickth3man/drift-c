@@ -187,9 +187,15 @@ def derived_metrics(run: Run) -> Dict[str, Optional[float]]:
         metrics["min_front_load_n"] = min(run.column("dynamic_front_load_n"))
         metrics["min_rear_load_n"] = min(run.column("dynamic_rear_load_n"))
     else:
-        for name in ("peak_load_transfer_n", "peak_filtered_accel_mps2",
-                     "peak_solved_accel_mps2", "peak_aero_drag_n",
-                     "peak_rolling_resistance_n", "min_front_load_n", "min_rear_load_n"):
+        for name in (
+            "peak_load_transfer_n",
+            "peak_filtered_accel_mps2",
+            "peak_solved_accel_mps2",
+            "peak_aero_drag_n",
+            "peak_rolling_resistance_n",
+            "min_front_load_n",
+            "min_rear_load_n",
+        ):
             metrics[name] = None
 
     metrics["final_checksum"] = run.value("state_checksum", len(run) - 1) if len(run) else 0.0
@@ -300,7 +306,7 @@ def tolerance_for(column: str, overrides: Optional[Dict[str, Tuple[float, float]
 
 class Difference:
     def __init__(self, kind: str, name: str, baseline, current, delta, tolerance, index=None):
-        self.kind = kind          # "exact", "column", "metric"
+        self.kind = kind  # "exact", "column", "metric"
         self.name = name
         self.baseline = baseline
         self.current = current
@@ -342,8 +348,9 @@ def compare_columns(
         if name in EXACT_COLUMNS or name == "state_checksum":
             continue
         if not current.has(name):
-            results.append(Difference("exact", name + " (missing column)", "present", "absent",
-                                      None, None))
+            results.append(
+                Difference("exact", name + " (missing column)", "present", "absent", None, None)
+            )
             continue
 
         atol, rtol = tolerance_for(name, overrides)
@@ -363,7 +370,12 @@ def compare_columns(
             allowed = atol + rtol * abs(a)
             margin = delta - allowed
             if margin > worst_margin:
-                worst_margin, worst_delta, worst_allowed, worst_index = delta - allowed, delta, allowed, i
+                worst_margin, worst_delta, worst_allowed, worst_index = (
+                    delta - allowed,
+                    delta,
+                    allowed,
+                    i,
+                )
         if worst_index is None:
             worst_delta, worst_allowed = 0.0, atol
         results.append(
@@ -377,12 +389,19 @@ def compare_exact(baseline: Run, current: Run) -> List[Difference]:
     results: List[Difference] = []
     results.append(Difference("exact", "tick count", len(baseline), len(current), None, None))
     results.append(
-        Difference("exact", "gear sequence", gear_sequence(baseline), gear_sequence(current),
-                   None, None)
+        Difference(
+            "exact", "gear sequence", gear_sequence(baseline), gear_sequence(current), None, None
+        )
     )
     results.append(
-        Difference("exact", "wheel lock events", len(lock_events(baseline)),
-                   len(lock_events(current)), None, None)
+        Difference(
+            "exact",
+            "wheel lock events",
+            len(lock_events(baseline)),
+            len(lock_events(current)),
+            None,
+            None,
+        )
     )
     return results
 
@@ -404,9 +423,7 @@ def compare_metrics(
         current_value = current_metrics.get(name)
         if base_value is None or current_value is None:
             if base_value != current_value:
-                results.append(
-                    Difference("exact", name, base_value, current_value, None, None)
-                )
+                results.append(Difference("exact", name, base_value, current_value, None, None))
             continue
         atol, rtol = table.get(name, (0.0, 0.05))
         delta = abs(current_value - base_value)
@@ -500,9 +517,7 @@ def line_chart(
         'role="img" aria-label="%s">' % (width, height, _escape(title))
     )
     parts.append('<rect x="0" y="0" width="%d" height="%d" fill="none"/>' % (width, height))
-    parts.append(
-        '<text x="%d" y="18" class="chart-title">%s</text>' % (left, _escape(title))
-    )
+    parts.append('<text x="%d" y="18" class="chart-title">%s</text>' % (left, _escape(title)))
 
     for step in range(5):
         value = y_low + (y_high - y_low) * step / 4.0

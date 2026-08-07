@@ -60,8 +60,13 @@ jobs:
       - name: Resolved toolchain
         run: make info
 
-      - name: Verify (format-check, lint, analyze, physics, regression)
-        run: make DRIFTY_STRICT=1 verify
+      # The C half of `verify`, named explicitly. lint-py is deliberately not run here: it is
+      # host-independent, and the only ruff available to MSYS2's Python is the pacman build,
+      # which tracks a different version from the pinned one in requirements-dev.txt.
+      # Two ruff versions would disagree about formatting and fail a job nobody can reproduce.
+      # The Linux job runs it instead, once, from the pin.
+      - name: Verify (format, lint, analyze, physics, regression)
+        run: make DRIFTY_STRICT=1 format-check lint analyze test-physics regression
 
   linux-headless:
     name: Linux headless (+ sanitizers)
@@ -75,6 +80,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang clang-format cppcheck gcovr
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
@@ -87,6 +93,11 @@ jobs:
 
       - name: Resolved toolchain
         run: make info
+
+      # Host-independent, so it runs here only rather than on both jobs. See the note in the
+      # UCRT64 job for why it is not part of that one.
+      - name: Python lint and format
+        run: make DRIFTY_STRICT=1 lint-py
 
       - name: Physics scenarios and baseline regression
         run: make DRIFTY_STRICT=1 test-physics regression

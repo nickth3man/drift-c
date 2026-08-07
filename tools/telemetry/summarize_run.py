@@ -55,8 +55,9 @@ def print_summary(summary: dict) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("csv", nargs="+")
     parser.add_argument("--json", help="write the summaries here as JSON")
     args = parser.parse_args(argv)

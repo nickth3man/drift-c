@@ -3,7 +3,8 @@
 
     python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv
     python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv --markdown summary.md
-    python tools/telemetry/compare_telemetry.py --baseline-dir tests/baselines --current-dir artifacts/telemetry
+    python tools/telemetry/compare_telemetry.py \
+        --baseline-dir tests/baselines --current-dir artifacts/telemetry
 
 Exit status is 0 when every comparison is inside tolerance and 1 when anything breached, so
 this is usable directly as a CI gate.
@@ -43,10 +44,16 @@ def compare_pair(baseline_path: str, current_path: str, quiet: bool = False):
 
     if not quiet:
         print("=== %s  vs  %s" % (baseline_path, current_path))
-        print("    rows %d -> %d, checksum %s" % (
-            len(baseline), len(current),
-            "identical" if tc.checksum_matches(baseline, current) else "differs (informational)",
-        ))
+        print(
+            "    rows %d -> %d, checksum %s"
+            % (
+                len(baseline),
+                len(current),
+                "identical"
+                if tc.checksum_matches(baseline, current)
+                else "differs (informational)",
+            )
+        )
         metrics_base = tc.derived_metrics(baseline)
         metrics_current = tc.derived_metrics(current)
         print("    %-24s %14s %14s %12s" % ("metric", "baseline", "current", "delta"))
@@ -68,8 +75,7 @@ def compare_pair(baseline_path: str, current_path: str, quiet: bool = False):
 
 
 def markdown_table(rows, headers) -> str:
-    lines = ["| " + " | ".join(headers) + " |",
-             "|" + "|".join(["---"] * len(headers)) + "|"]
+    lines = ["| " + " | ".join(headers) + " |", "|" + "|".join(["---"] * len(headers)) + "|"]
     for row in rows:
         lines.append("| " + " | ".join(str(cell) for cell in row) + " |")
     return "\n".join(lines)
@@ -110,8 +116,9 @@ def largest_change_text(differences) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("baseline", nargs="?", help="baseline CSV")
     parser.add_argument("current", nargs="?", help="current CSV")
     parser.add_argument("--baseline-dir", help="compare every baseline CSV in this directory")
@@ -145,8 +152,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not args.baseline or not args.current:
             parser.error("give two CSV paths, or --baseline-dir with --current-dir")
         differences, breaches = compare_pair(args.baseline, args.current, args.quiet)
-        results.append((os.path.basename(args.baseline), breaches,
-                        largest_change_text(differences)))
+        results.append(
+            (os.path.basename(args.baseline), breaches, largest_change_text(differences))
+        )
         failed = bool(breaches)
 
     if args.markdown:

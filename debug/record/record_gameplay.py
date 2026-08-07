@@ -9,7 +9,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 TELEMETRY_DIR = Path("artifacts/telemetry")
 TEST_EXE = Path("build/tests/drifty_tests.exe")
 WHEEL_RADIUS_M = 0.31
@@ -33,6 +32,7 @@ def discover_scenario_sources():
     for csv_path in TELEMETRY_DIR.glob("scenario_*.csv"):
         sources[csv_path.stem] = csv_path.name
     return sources
+
 
 INT_FIELDS = {
     "tick",
@@ -118,8 +118,7 @@ def run_headless_simulation():
     }
     if result.returncode != 0:
         raise RuntimeError(
-            f"headless test suite failed with exit code {result.returncode}: "
-            f"{metadata['stderr']}"
+            f"headless test suite failed with exit code {result.returncode}: {metadata['stderr']}"
         )
     return metadata
 
@@ -235,13 +234,17 @@ def build_derived_physics(row, prev_row=None):
             "front": rounded(f_fy_lim, 2),
             "rear": rounded(r_fy_lim, 2),
         },
-        "service_brake_balance_pct": rounded(f_brake_tq / service_brake_tq * 100.0 if service_brake_tq else 0.0, 2),
+        "service_brake_balance_pct": rounded(
+            f_brake_tq / service_brake_tq * 100.0 if service_brake_tq else 0.0, 2
+        ),
         "rear_wheelspin_excess_rad_s": rounded(r_omega - f_omega, 3),
         "rear_wheel_power_estimate_kw": rounded(rear_wheel_power_kw, 3),
         "friction_utilization_pct": rounded((f_usage + r_usage) / 2.0 * 100.0, 2),
         "front_tire_force_magnitude_n": rounded(front_tire_force_mag_n, 2),
         "rear_tire_force_magnitude_n": rounded(rear_tire_force_mag_n, 2),
-        "yaw_torque_per_rate_estimate": rounded(yaw_tq / yaw_rate if abs(yaw_rate) > 0.01 else None, 3),
+        "yaw_torque_per_rate_estimate": rounded(
+            yaw_tq / yaw_rate if abs(yaw_rate) > 0.01 else None, 3
+        ),
         "jerk_longitudinal_mps3": rounded(jerk_long, 3),
         "jerk_lateral_mps3": rounded(jerk_lat, 3),
         "path_curvature_1m": rounded(curvature, 6),
@@ -266,10 +269,14 @@ def build_derived_physics(row, prev_row=None):
         "assumed_front_brake_pressure_kpa": rounded(f_brake_tq * 0.15, 3),
         "assumed_rear_brake_pressure_kpa": rounded(r_brake_tq * 0.15, 3),
         "assumed_drivetrain_loss_nm": rounded(drive_tq * 0.12, 3),
-        "static_load_minus_net_tire_force_n": rounded(static_f + static_r - total_friction_force_n, 2),
+        "static_load_minus_net_tire_force_n": rounded(
+            static_f + static_r - total_friction_force_n, 2
+        ),
         "stopping_distance_estimate_m": rounded(stopping_distance, 3),
         "front_cornering_stiffness_n_rad": rounded(cornering_stiffness, 3),
-        "estimated_tire_temperature_c": rounded(22.0 + (abs(f_fx_lim * f_slip_r * speed) + abs(r_fx_lim * r_slip_r * speed)) * 0.002, 3),
+        "estimated_tire_temperature_c": rounded(
+            22.0 + (abs(f_fx_lim * f_slip_r * speed) + abs(r_fx_lim * r_slip_r * speed)) * 0.002, 3
+        ),
         "accel_magnitude_mps2": rounded(math.hypot(accel_long, accel_lat), 3),
         "g_force_long": rounded(accel_long / 9.80665, 5),
         "g_force_lat": rounded(accel_lat / 9.80665, 5),
@@ -277,7 +284,9 @@ def build_derived_physics(row, prev_row=None):
         "wheel_speed_differential_rad_s": rounded(abs(f_omega - r_omega), 3),
         "front_slip_angle_deg": rounded(math.degrees(f_slip_a), 3),
         "rear_slip_angle_deg": rounded(math.degrees(r_slip_a), 3),
-        "avg_slip_angle_deg": rounded((abs(math.degrees(f_slip_a)) + abs(math.degrees(r_slip_a))) / 2.0, 3),
+        "avg_slip_angle_deg": rounded(
+            (abs(math.degrees(f_slip_a)) + abs(math.degrees(r_slip_a))) / 2.0, 3
+        ),
         "yaw_rate_deg_s": rounded(math.degrees(yaw_rate), 3),
         "steering_angle_deg": rounded(math.degrees(steer), 3),
         "body_slip_angle_deg": rounded(math.degrees(sideslip), 3),
@@ -315,14 +324,16 @@ def build_input_event_trace(rows):
     if not rows:
         return events
     for control in controls:
-        events.append({
-            "time_s": float_value(rows[0], "time_s"),
-            "tick": int(float_value(rows[0], "tick")),
-            "type": "initial_control",
-            "control": control,
-            "from": None,
-            "to": float_value(rows[0], control),
-        })
+        events.append(
+            {
+                "time_s": float_value(rows[0], "time_s"),
+                "tick": int(float_value(rows[0], "tick")),
+                "type": "initial_control",
+                "control": control,
+                "from": None,
+                "to": float_value(rows[0], control),
+            }
+        )
     previous_sides = {"steering_angle_rad": 0}
     previous_flags = {"front_locked": 0, "rear_locked": 0}
     for index in range(1, len(rows)):
@@ -332,39 +343,45 @@ def build_input_event_trace(rows):
             before = float_value(previous, control)
             after = float_value(row, control)
             if abs(after - before) > 1e-6:
-                events.append({
-                    "time_s": float_value(row, "time_s"),
-                    "tick": int(float_value(row, "tick")),
-                    "type": "control_change",
-                    "control": control,
-                    "from": before,
-                    "to": after,
-                })
+                events.append(
+                    {
+                        "time_s": float_value(row, "time_s"),
+                        "tick": int(float_value(row, "tick")),
+                        "type": "control_change",
+                        "control": control,
+                        "from": before,
+                        "to": after,
+                    }
+                )
         steer = float_value(row, "steering_angle_rad")
         side = 1 if steer > 0.01 else -1 if steer < -0.01 else 0
         if side != previous_sides["steering_angle_rad"]:
-            events.append({
-                "time_s": float_value(row, "time_s"),
-                "tick": int(float_value(row, "tick")),
-                "type": "steering_direction_change",
-                "control": "steering_angle_rad",
-                "from": previous_sides["steering_angle_rad"],
-                "to": side,
-                "value": steer,
-            })
+            events.append(
+                {
+                    "time_s": float_value(row, "time_s"),
+                    "tick": int(float_value(row, "tick")),
+                    "type": "steering_direction_change",
+                    "control": "steering_angle_rad",
+                    "from": previous_sides["steering_angle_rad"],
+                    "to": side,
+                    "value": steer,
+                }
+            )
             previous_sides["steering_angle_rad"] = side
         for flag in previous_flags:
             before = int(float_value(previous, flag))
             after = int(float_value(row, flag))
             if after != before:
-                events.append({
-                    "time_s": float_value(row, "time_s"),
-                    "tick": int(float_value(row, "tick")),
-                    "type": "lock_state_change",
-                    "control": flag,
-                    "from": before,
-                    "to": after,
-                })
+                events.append(
+                    {
+                        "time_s": float_value(row, "time_s"),
+                        "tick": int(float_value(row, "tick")),
+                        "type": "lock_state_change",
+                        "control": flag,
+                        "from": before,
+                        "to": after,
+                    }
+                )
                 previous_flags[flag] = after
     return events
 
@@ -418,9 +435,16 @@ def write_review_svg(target_dir, scenario, rows):
         ("Speed and acceleration", [("speed km/h", "#4cc9f0"), ("longitudinal m/s²", "#f72585")]),
         ("Yaw and sideslip", [("yaw rad/s", "#4cc9f0"), ("sideslip rad", "#f72585")]),
         ("Tire slip angles", [("front deg", "#4cc9f0"), ("rear deg", "#f72585")]),
-        ("Driver inputs", [("throttle", "#4cc9f0"), ("brake", "#f72585"), ("handbrake", "#ffd166")]),
+        (
+            "Driver inputs",
+            [("throttle", "#4cc9f0"), ("brake", "#f72585"), ("handbrake", "#ffd166")],
+        ),
     ]
-    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">', '<rect width="100%" height="100%" fill="#10131a"/>', f'<text x="40" y="34" fill="#ffffff" font-family=" sans-serif" font-size="22">{scenario} telemetry review</text>']
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#10131a"/>',
+        f'<text x="40" y="34" fill="#ffffff" font-family=" sans-serif" font-size="22">{scenario} telemetry review</text>',
+    ]
     panel_w, panel_h = 540, 365
     for panel_index, (title, series_defs) in enumerate(panels):
         x = 35 + (panel_index % 2) * 575
@@ -437,25 +461,43 @@ def write_review_svg(target_dir, scenario, rows):
             "brake": lambda r: float_value(r, "brake_input"),
             "handbrake": lambda r: float_value(r, "handbrake_input"),
         }
-        plotted = [(label, [field_map[label](row) for row in rows], color) for label, color in series_defs]
+        plotted = [
+            (label, [field_map[label](row) for row in rows], color) for label, color in series_defs
+        ]
         minimum = min((value for _, values, _ in plotted for value in values), default=0.0)
         maximum = max((value for _, values, _ in plotted for value in values), default=1.0)
         if minimum == maximum:
             minimum -= 1.0
             maximum += 1.0
-        svg.append(f'<rect x="{x}" y="{y}" width="{panel_w}" height="{panel_h}" rx="8" fill="#181d27" stroke="#343b4a"/>')
-        svg.append(f'<text x="{x + 16}" y="{y + 28}" fill="#ffffff" font-family="sans-serif" font-size="16">{title}</text>')
+        svg.append(
+            f'<rect x="{x}" y="{y}" width="{panel_w}" height="{panel_h}" rx="8" fill="#181d27" stroke="#343b4a"/>'
+        )
+        svg.append(
+            f'<text x="{x + 16}" y="{y + 28}" fill="#ffffff" font-family="sans-serif" font-size="16">{title}</text>'
+        )
         chart_x, chart_y = x + 18, y + 48
         chart_w, chart_h = panel_w - 36, panel_h - 78
-        svg.append(f'<line x1="{chart_x}" y1="{chart_y + chart_h / 2:.1f}" x2="{chart_x + chart_w}" y2="{chart_y + chart_h / 2:.1f}" stroke="#303746"/>')
-        for label, values, color in plotted:
-            svg.append(f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{svg_polyline(values, chart_x, chart_y, chart_w, chart_h, minimum, maximum)}"/>')
+        svg.append(
+            f'<line x1="{chart_x}" y1="{chart_y + chart_h / 2:.1f}" x2="{chart_x + chart_w}" y2="{chart_y + chart_h / 2:.1f}" stroke="#303746"/>'
+        )
+        for _label, values, color in plotted:
+            svg.append(
+                f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{svg_polyline(values, chart_x, chart_y, chart_w, chart_h, minimum, maximum)}"/>'
+            )
         for legend_index, (label, _, color) in enumerate(plotted):
             lx = x + 18 + legend_index * 150
-            svg.append(f'<rect x="{lx}" y="{y + panel_h - 23}" width="10" height="10" fill="{color}"/>')
-            svg.append(f'<text x="{lx + 15}" y="{y + panel_h - 13}" fill="#cbd2df" font-family="sans-serif" font-size="11">{label}</text>')
-        svg.append(f'<text x="{x + panel_w - 120}" y="{y + 48}" fill="#8993a7" font-family="sans-serif" font-size="10">max {maximum:.3f}</text>')
-        svg.append(f'<text x="{x + panel_w - 120}" y="{y + panel_h - 34}" fill="#8993a7" font-family="sans-serif" font-size="10">min {minimum:.3f}</text>')
+            svg.append(
+                f'<rect x="{lx}" y="{y + panel_h - 23}" width="10" height="10" fill="{color}"/>'
+            )
+            svg.append(
+                f'<text x="{lx + 15}" y="{y + panel_h - 13}" fill="#cbd2df" font-family="sans-serif" font-size="11">{label}</text>'
+            )
+        svg.append(
+            f'<text x="{x + panel_w - 120}" y="{y + 48}" fill="#8993a7" font-family="sans-serif" font-size="10">max {maximum:.3f}</text>'
+        )
+        svg.append(
+            f'<text x="{x + panel_w - 120}" y="{y + panel_h - 34}" fill="#8993a7" font-family="sans-serif" font-size="10">min {minimum:.3f}</text>'
+        )
     svg.append("</svg>")
     (target_dir / "review.svg").write_text("\n".join(svg) + "\n", encoding="utf-8")
 
@@ -509,7 +551,9 @@ def generate_machine_readable_logs(target_dir, scenario, execution_metadata):
 
     times = [float_value(row, "time_s") for row in rows]
     duration = times[-1] if times else 0.0
-    sample_rate = (len(rows) - 1) / (times[-1] - times[0]) if len(rows) > 1 and times[-1] > times[0] else None
+    sample_rate = (
+        (len(rows) - 1) / (times[-1] - times[0]) if len(rows) > 1 and times[-1] > times[0] else None
+    )
     nonfinite_raw_values = sum(
         1
         for row in rows
@@ -526,7 +570,12 @@ def generate_machine_readable_logs(target_dir, scenario, execution_metadata):
         "max_substep_count": max(int(float_value(row, "substep_count")) for row in rows),
         "nonfinite_raw_values": nonfinite_raw_values,
         "friction_usage_over_one": sum(
-            1 for row in rows if max(float_value(row, "front_friction_usage"), float_value(row, "rear_friction_usage")) > 1.000001
+            1
+            for row in rows
+            if max(
+                float_value(row, "front_friction_usage"), float_value(row, "rear_friction_usage")
+            )
+            > 1.000001
         ),
     }
     summary = {
@@ -537,9 +586,15 @@ def generate_machine_readable_logs(target_dir, scenario, execution_metadata):
         "peak_ground_truth_metrics": {
             "max_speed_kmh": round(max(float_value(row, "speed_mps") for row in rows) * 3.6, 3),
             "max_engine_rpm": round(max(float_value(row, "engine_rpm") for row in rows), 3),
-            "max_abs_rear_slip_angle_deg": round(max(abs(math.degrees(float_value(row, "rear_slip_angle_rad"))) for row in rows), 3),
-            "max_abs_body_sideslip_deg": round(max(abs(math.degrees(float_value(row, "body_sideslip_rad"))) for row in rows), 3),
-            "max_abs_yaw_rate_deg_s": round(max(abs(math.degrees(float_value(row, "yaw_rate_rad_s"))) for row in rows), 3),
+            "max_abs_rear_slip_angle_deg": round(
+                max(abs(math.degrees(float_value(row, "rear_slip_angle_rad"))) for row in rows), 3
+            ),
+            "max_abs_body_sideslip_deg": round(
+                max(abs(math.degrees(float_value(row, "body_sideslip_rad"))) for row in rows), 3
+            ),
+            "max_abs_yaw_rate_deg_s": round(
+                max(abs(math.degrees(float_value(row, "yaw_rate_rad_s"))) for row in rows), 3
+            ),
         },
         "quality": quality,
     }
@@ -552,7 +607,9 @@ def generate_machine_readable_logs(target_dir, scenario, execution_metadata):
     execution["scenario"] = scenario
     execution["source_csv_sha256"] = sha256_bytes(source_bytes)
     execution["copied_csv_sha256"] = sha256_bytes(copied_csv.read_bytes())
-    execution["byte_exact_csv_snapshot"] = execution["source_csv_sha256"] == execution["copied_csv_sha256"]
+    execution["byte_exact_csv_snapshot"] = (
+        execution["source_csv_sha256"] == execution["copied_csv_sha256"]
+    )
     write_json(execution_path, execution)
     files["execution"] = execution_path.name
 
@@ -576,9 +633,15 @@ def generate_machine_readable_logs(target_dir, scenario, execution_metadata):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Headless C telemetry recorder and review artifact generator")
+    parser = argparse.ArgumentParser(
+        description="Headless C telemetry recorder and review artifact generator"
+    )
     parser.add_argument("--scenario", default=None, help="exact emitted telemetry scenario name")
-    parser.add_argument("--all", action="store_true", help="record every telemetry-producing scenario after one test-suite run")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="record every telemetry-producing scenario after one test-suite run",
+    )
     args = parser.parse_args()
     if not args.all and args.scenario is None:
         args.scenario = "scenario_step-steer"

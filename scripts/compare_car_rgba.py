@@ -166,9 +166,7 @@ def read_png(path: Path) -> Image:
 
 def compare(a: Image, b: Image) -> Metrics:
     if (a.width, a.height) != (b.width, b.height):
-        raise ValueError(
-            f"image dimensions differ: {a.width}x{a.height} vs {b.width}x{b.height}"
-        )
+        raise ValueError(f"image dimensions differ: {a.width}x{a.height} vs {b.width}x{b.height}")
 
     pixels = a.width * a.height
     differing = 0
@@ -214,23 +212,18 @@ def compare(a: Image, b: Image) -> Metrics:
 def _failures(metrics: Metrics, args: argparse.Namespace) -> Iterable[str]:
     if metrics.differing_ratio > args.max_differing_ratio:
         yield (
-            f"differing ratio {metrics.differing_ratio:.8f} exceeds "
-            f"{args.max_differing_ratio:.8f}"
+            f"differing ratio {metrics.differing_ratio:.8f} exceeds {args.max_differing_ratio:.8f}"
         )
     if metrics.alpha_xor_ratio > args.max_alpha_xor_ratio:
         yield (
-            f"alpha XOR ratio {metrics.alpha_xor_ratio:.8f} exceeds "
-            f"{args.max_alpha_xor_ratio:.8f}"
+            f"alpha XOR ratio {metrics.alpha_xor_ratio:.8f} exceeds {args.max_alpha_xor_ratio:.8f}"
         )
     if metrics.rgb_rmse > args.max_rgb_rmse:
         yield f"RGB RMSE {metrics.rgb_rmse:.6f} exceeds {args.max_rgb_rmse:.6f}"
     if metrics.rgba_rmse > args.max_rgba_rmse:
         yield f"RGBA RMSE {metrics.rgba_rmse:.6f} exceeds {args.max_rgba_rmse:.6f}"
     if metrics.max_channel_delta > args.max_channel_delta:
-        yield (
-            f"max channel delta {metrics.max_channel_delta} exceeds "
-            f"{args.max_channel_delta}"
-        )
+        yield (f"max channel delta {metrics.max_channel_delta} exceeds {args.max_channel_delta}")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
