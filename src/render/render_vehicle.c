@@ -192,8 +192,8 @@ static bool s_carTexVisualValid = false;
 static void ensure_car_textures(const CarVisual *visual, float pxPerM)
 {
     const uint32_t key = car_visual_bake_key(visual);
-    if (s_car.ready && s_carTexVisualValid && key == s_carTexKey &&
-        pxPerM == s_carTexPxPerM && memcmp(visual, &s_carTexVisual, sizeof(*visual)) == 0) {
+    if (s_car.ready && s_carTexVisualValid && key == s_carTexKey && pxPerM == s_carTexPxPerM &&
+        memcmp(visual, &s_carTexVisual, sizeof(*visual)) == 0) {
         return;
     }
 
