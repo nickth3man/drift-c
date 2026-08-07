@@ -1,7 +1,10 @@
 # Drifty — one command per operation.
 #
-# These local targets are the project's checks. There is no hosted CI: the compiler/OS
-# matrix, hot-reload harness, linkage inspection, and security analysis are run by hand.
+# These local targets are the project's checks, and .github/workflows/ci.yml runs the same
+# ones on every push: a UCRT64 job for the canonical toolchain and a Linux job for the
+# headless targets, including the sanitizers UCRT64 cannot link. CI passes DRIFTY_STRICT=1,
+# which turns a missing tool from a SKIP into a failure. The hot-reload harness, linkage
+# inspection, and the interactive game remain hand-run.
 #
 #   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
 #   make run              build, then LAUNCH the game (interactive; blocks until the window closes)
@@ -22,6 +25,7 @@
 #   make benchmark        fixed-update throughput
 #   make release          release build
 #   make ci               core local checks; inspect every SKIP line
+#   make DRIFTY_STRICT=1 ci   same, but a missing tool fails instead of skipping (what CI runs)
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make lint             cppcheck                   make analyze       clang --analyze
@@ -98,6 +102,18 @@ CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 CPPCHECK     := $(shell command -v cppcheck 2>/dev/null)
 GCOVR        := $(shell command -v gcovr 2>/dev/null)
 MAGICK       := $(shell command -v magick 2>/dev/null)
+
+# A missing tool is advisory on a developer machine and fatal in CI. Without this, `make ci`
+# exits 0 having run almost nothing whenever a tool is absent, which is exactly the state a
+# hosted CI job starts in — so every check has to opt out loudly rather than silently.
+#
+#   make ci                 SKIP lines, exit 0     (local: install what you need, or don't)
+#   make DRIFTY_STRICT=1 ci MISSING lines, exit 1  (CI: a check that did not run is a failure)
+ifdef DRIFTY_STRICT
+skip = @echo "MISSING $(1)" >&2; exit 1
+else
+skip = @echo "SKIP $(1)" >&2
+endif
 
 # ------------------------------------------------------------------------------- flags --
 
@@ -355,7 +371,7 @@ endif
 
 format-check:
 ifeq ($(CLANG_FORMAT),)
-	@echo "SKIP format-check: clang-format not installed."
+	$(call skip,format-check: clang-format not installed.)
 else
 	$(CLANG_FORMAT) --dry-run --Werror $(ALL_C_SRCS) $(ALL_H_SRCS)
 	@echo "format ok"
@@ -363,7 +379,7 @@ endif
 
 lint:
 ifeq ($(CPPCHECK),)
-	@echo "SKIP lint: cppcheck not installed (pacman -S mingw-w64-ucrt-x86_64-cppcheck)."
+	$(call skip,lint: cppcheck not installed (pacman -S mingw-w64-ucrt-x86_64-cppcheck).)
 else
 	# unusedFunction is left to the nightly `--enable=all` pass: a library of registry and
 	# inspector helpers legitimately has entry points that any single analysed set does not
@@ -379,7 +395,7 @@ endif
 
 analyze:
 ifeq ($(CLANG),)
-	@echo "SKIP analyze: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang)."
+	$(call skip,analyze: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
 	@for f in $(ANALYZE_SRCS); do \
 	    echo "  analyze $$f"; \
@@ -400,9 +416,9 @@ verify: format-check lint analyze test-physics regression
 sanitize:
 ifeq ($(CLANG),)
 ifeq ($(DRIFTY_HOST),ucrt64)
-	@echo "SKIP sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang)." >&2
+	$(call skip,sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
-	@echo "SKIP sanitize: clang not installed. Install it with the platform package manager." >&2
+	$(call skip,sanitize: clang not installed. Install it with the platform package manager.)
 endif
 else
 	@mkdir -p $(BUILD_SANITIZE)
@@ -414,6 +430,8 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    echo "SKIP sanitize: this clang installation has no linkable ASan/UBSan runtime." >&2; \
 	    echo "MSYS2 provides those runtimes in CLANG64, not the supported UCRT64 environment." >&2; \
+	    echo "This SKIP is unconditional, including under DRIFTY_STRICT: it is a documented" >&2; \
+	    echo "platform limitation, not a missing tool. CI runs the sanitizers on Linux." >&2; \
 	else \
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
@@ -458,7 +476,7 @@ coverage:
 	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX) -lm
 	./$(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX)
 ifeq ($(GCOVR),)
-	@echo "SKIP gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept."
+	$(call skip,gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept.)
 else
 	$(GCOVR) --root . --filter 'src/.*' --exclude 'src/dev/dev_lab.c' \
 	    --txt --html-details $(BUILD_COVERAGE)/index.html \
@@ -520,7 +538,7 @@ visual-diagnose: cards
 
 visual-test: screenshots
 ifeq ($(MAGICK),)
-	@echo "SKIP visual-test: ImageMagick not installed (winget install ImageMagick.ImageMagick)."
+	$(call skip,visual-test: ImageMagick not installed (winget install ImageMagick.ImageMagick).)
 else
 	@mkdir -p $(ARTIFACTS)/visual-diff
 	@status=0; \
@@ -544,7 +562,7 @@ endif
 
 fuzz:
 ifeq ($(CLANG),)
-	@echo "SKIP fuzz: clang with libFuzzer not installed." >&2
+	$(call skip,fuzz: clang with libFuzzer not installed.)
 else
 	@mkdir -p $(BUILD_FUZZ) $(ARTIFACTS)/fuzz/crashes
 	@for target in fuzz/fuzz_*.c; do \
@@ -581,7 +599,12 @@ profile: windows-only
 ci: format-check lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
-	@echo "ci: core local checks passed; inspect any SKIP lines."
+ifdef DRIFTY_STRICT
+	@echo "ci: all checks ran and passed (DRIFTY_STRICT: nothing was skipped)."
+else
+	@echo "ci: core local checks passed; inspect any SKIP lines above."
+	@echo "    A SKIP is not a pass. Re-run with DRIFTY_STRICT=1 to make one fail."
+endif
 
 # ---------------------------------------------------------------------- editor support --
 
