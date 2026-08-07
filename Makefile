@@ -209,6 +209,8 @@ BUILD_COVERAGE := $(BUILD_DIR)/coverage
 BUILD_FUZZ     := $(BUILD_DIR)/fuzz
 BUILD_PACKAGES := $(BUILD_DIR)/packages
 
+ANALYZE_LOG := $(BUILD_DIR)/analyze.log
+
 EXE_TESTS   := $(BUILD_TESTS)/drifty_tests$(EXE_SUFFIX)
 EXE_DEBUG   := $(BUILD_DEV)/drifty$(EXE_SUFFIX)
 EXE_RELEASE := $(BUILD_RELEASE)/drifty_release$(EXE_SUFFIX)
@@ -397,12 +399,22 @@ analyze:
 ifeq ($(CLANG),)
 	$(call skip,analyze: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(ANALYZE_LOG)
 	@for f in $(ANALYZE_SRCS); do \
 	    echo "  analyze $$f"; \
 	    $(CLANG) --analyze -Xanalyzer -analyzer-output=text $(CSTD) $(INCLUDES) \
-	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null || exit 1; \
+	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null 2>>$(ANALYZE_LOG) || exit 1; \
 	done
-	@echo "clang --analyze clean"
+	@cat $(ANALYZE_LOG)
+	@n=$$(grep -c 'warning:' $(ANALYZE_LOG) 2>/dev/null || true); n=$${n:-0}; \
+	if [ "$$n" -eq 0 ]; then \
+	    echo "clang --analyze clean"; \
+	else \
+	    echo "clang --analyze: $$n warning(s) — see $(ANALYZE_LOG)"; \
+	    echo "  clang exits 0 on analyzer findings, so these do NOT fail this target."; \
+	    echo "  Gating them lands with clang-tidy, on changed files only."; \
+	fi
 endif
 
 verify-fast: format-check test

@@ -1,0 +1,106 @@
+# The same checks the Makefile offers locally, run on every push and pull request.
+#
+# Both jobs pass DRIFTY_STRICT=1, which turns a missing tool from a SKIP into a failure.
+# Without it a runner that happens to lack cppcheck would report a green tick for a job
+# that never linted anything.
+#
+# Two jobs because neither host covers everything:
+#   windows-ucrt64  the canonical toolchain developers actually build with, and the only
+#                   one the hot-reload link path is designed for
+#   linux-headless  the headless targets, and the only place ASan/UBSan can link at all —
+#                   MSYS2 ships those runtimes in CLANG64, not the supported UCRT64
+#
+# Actions are pinned by commit SHA, not tag, so a moved tag cannot change what runs here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-ucrt64:
+    name: Windows UCRT64 (canonical)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            git
+          # `:p` resolves to the mingw-w64-ucrt-x86_64- prefix for this msystem.
+          # pkgconf is not optional: the Makefile errors out without pkg-config,
+          # and uses it to locate the raylib headers and cflags.
+          pacboy: >-
+            gcc:p
+            pkgconf:p
+            raylib:p
+            clang:p
+            clang-tools-extra:p
+            cppcheck:p
+            gcovr:p
+            python:p
+
+      - name: Resolved toolchain
+        run: make info
+
+      - name: Verify (format-check, lint, analyze, physics, regression)
+        run: make DRIFTY_STRICT=1 verify
+
+  linux-headless:
+    name: Linux headless (+ sanitizers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang clang-format cppcheck gcovr
+
+      # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
+      # build calls no raylib function and links no raylib library. So clone the source
+      # tree and stop — no build, no install. third_party/raylib-src is the fallback path
+      # the Makefile already looks for, and it is gitignored.
+      - name: Fetch raylib headers
+        run: |
+          git clone --depth 1 --branch 6.0 \
+            https://github.com/raysan5/raylib third_party/raylib-src
+
+      - name: Resolved toolchain
+        run: make info
+
+      - name: Physics scenarios and baseline regression
+        run: make DRIFTY_STRICT=1 test-physics regression
+
+      # This is the only place the sanitizers actually run; the UCRT64 job skips them by
+      # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
+      - name: ASan + UBSan
+        run: make DRIFTY_STRICT=1 sanitize
+
+      - name: Upload failure bundles
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failure-bundles-linux
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
