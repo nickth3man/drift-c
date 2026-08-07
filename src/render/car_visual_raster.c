@@ -65,15 +65,21 @@ typedef struct {
 /* ------------------------------------------------------------------------- primitives -- */
 
 /* The hull polygon connects its nine stations with straight segments. Test the same geometry
- * at the pixel centre so a body-clipped fill cannot create silhouette pixels of its own. */
+ * at the pixel centre so a body-clipped fill cannot create silhouette pixels of its own.
+ *
+ * Assumes hull[].xM increases strictly from tail to nose, which is what build_hull() already
+ * relies on to trace a non-self-intersecting outline. The endpoint test and the station walk
+ * below both depend on it: out-of-order stations would silently clip against the wrong
+ * segment rather than merely drawing an odd polygon. */
 static bool pixel_inside_clip_hull(const RasterTarget *t, int x, int y)
 {
     if (t->clipHull == NULL) return true;
 
     const CarVisual *v = t->clipHull;
     const int last = CAR_HULL_STATIONS - 1;
-    const float xM = (((float)x + 0.5f) - t->originXPx) / t->pxPerM;
-    const float yM = (t->originYPx - ((float)y + 0.5f)) / t->pxPerM;
+    const float invPxPerM = 1.0f / t->pxPerM;
+    const float xM = (((float)x + 0.5f) - t->originXPx) * invPxPerM;
+    const float yM = (t->originYPx - ((float)y + 0.5f)) * invPxPerM;
 
     if (xM < v->hull[0].xM || xM > v->hull[last].xM) return false;
 
