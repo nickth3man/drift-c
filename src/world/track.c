@@ -89,16 +89,16 @@ void track_init(Track *track)
     const float hw = 4.0f; /* wide enough so inner/outer barriers don't sandwich the car */
     const float noRunoff = 0.0f;
     int i = 0;
-    track->nodes[i++] =
-        (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT, noRunoff };
-    track->nodes[i++] =
-        (TrackNode){ { track->lotMaxXM, track->lotMinYM }, hw, SURFACE_ASPHALT, noRunoff };
-    track->nodes[i++] =
-        (TrackNode){ { track->lotMaxXM, track->lotMaxYM }, hw, SURFACE_ASPHALT, noRunoff };
-    track->nodes[i++] =
-        (TrackNode){ { track->lotMinXM, track->lotMaxYM }, hw, SURFACE_ASPHALT, noRunoff };
-    track->nodes[i++] =
-        (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT, noRunoff };
+    /* The lot has no optimised line: a target point equal to the centreline is the correct
+     * answer for an open area, and it keeps every consumer free of a null-line special case. */
+    const Vector2 corners[LOT_NODES] = {
+        { track->lotMinXM, track->lotMinYM }, { track->lotMaxXM, track->lotMinYM },
+        { track->lotMaxXM, track->lotMaxYM }, { track->lotMinXM, track->lotMaxYM },
+        { track->lotMinXM, track->lotMinYM },
+    };
+    for (i = 0; i < LOT_NODES; i++) {
+        track->nodes[i] = (TrackNode){ corners[i], hw, SURFACE_ASPHALT, noRunoff, corners[i] };
+    }
 
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
@@ -110,6 +110,7 @@ void track_init(Track *track)
     track_build_checkpoints_from_nodes(track);
     track->nextCheckpoint = 0;
     track->lap = 0;
+    track->lapStartCheckpoint = 0;
     track->lapTimerS = 0.0f;
     track->lastLapTimeS = 0.0f;
     snprintf(track->id, sizeof(track->id), "%s", "parking_lot");
@@ -129,6 +130,7 @@ void track_free(Track *track)
     track->runoffSurfaceId = SURFACE_ASPHALT;
     track->nextCheckpoint = 0;
     track->lap = 0;
+    track->lapStartCheckpoint = 0;
     track->lapTimerS = 0.0f;
     track->lastLapTimeS = 0.0f;
     track->id[0] = '\0';
@@ -290,6 +292,7 @@ static void builder_push(NodeBuilder *b, float x, float y, float halfWidthM, flo
     b->nodes[b->count].halfWidthM = halfWidthM;
     b->nodes[b->count].surfaceId = SURFACE_ASPHALT;
     b->nodes[b->count].runoffHalfWidthM = runoffM;
+    b->nodes[b->count].racingLineM = b->nodes[b->count].centerM;
     b->count++;
 }
 
@@ -298,6 +301,94 @@ static float chicane_offset_at(float u)
 {
     const float s = sinf(3.14159265358979323846f * u);
     return CHICANE_OFFSET_M * s * s;
+}
+/*
+ * Learned target racing lines.
+ *
+ * Each array is the output of tools/validation/learn_racing_line.py: a small MLP policy whose
+ * weights are searched by deterministic cross-entropy neuroevolution against a friction-limited
+ * lap-time model, constrained to stay inside the racing surface and to pass every ordered gate.
+ * The offsets are stored as data rather than recomputed at load time so the simulation keeps
+ * bit-identical determinism and no runtime file dependency. Regenerate with:
+ *
+ *   python tools/validation/learn_racing_line.py --track <chicane|sprint|technical>
+ */
+#define RACING_LINE_CONTROL_COUNT 48
+
+/* Asphalt the target line always leaves between itself and the edge: half a car plus the
+ * tracking error a pure-pursuit driver shows on a curved line. Mirrors LINE_EDGE_MARGIN_M in
+ * tools/validation/learn_racing_line.py, which is where the offsets below come from. */
+#define RACING_LINE_EDGE_MARGIN_M 2.4f
+
+static const float chicaneRacingLineOffsetsM[RACING_LINE_CONTROL_COUNT] = {
+    4.203433f, 3.501952f, 3.094172f, 2.924932f, 2.942308f, 2.954400f, 2.946107f, 2.883061f,
+    2.832930f, 2.806470f, 2.841968f, 2.905167f, 3.040182f, 3.457055f, 4.080215f, 4.743702f,
+    4.928899f, 5.023841f, 5.006110f, 4.977602f, 4.970184f, 4.922951f, 4.734815f, 4.409962f,
+    3.608801f, 2.659580f, 1.990668f, 1.793507f, 1.711879f, 2.264491f, 2.608949f, 2.183696f,
+    1.630055f, 1.581713f, 1.864908f, 2.207226f, 2.439383f, 2.977775f, 3.770693f, 4.581289f,
+    4.849478f, 5.006745f, 5.025177f, 5.026560f, 5.038845f, 5.049263f, 4.991628f, 4.821791f,
+};
+
+static const float sprintRacingLineOffsetsM[RACING_LINE_CONTROL_COUNT] = {
+    4.128194f, 3.563185f, 3.468396f, 3.456193f, 3.536170f, 3.600452f, 3.592642f, 3.509487f,
+    3.444480f, 3.413158f, 3.413106f, 3.418004f, 3.493897f, 3.793149f, 4.223717f, 4.671504f,
+    4.680960f, 4.654544f, 4.565728f, 4.484815f, 4.471361f, 4.418684f, 4.244075f, 3.922720f,
+    3.051397f, 2.119795f, 1.477665f, 1.295357f, 1.330572f, 2.083652f, 2.362090f, 1.757652f,
+    0.991898f, 1.090016f, 1.475309f, 1.911820f, 2.446432f, 3.011854f, 3.710677f, 4.447579f,
+    4.580745f, 4.657152f, 4.658769f, 4.663110f, 4.697817f, 4.745900f, 4.754998f, 4.652003f,
+};
+
+static const float technicalRacingLineOffsetsM[RACING_LINE_CONTROL_COUNT] = {
+    2.977061f, 2.685542f, 2.607393f, 2.577832f, 2.632068f, 2.672957f, 2.629338f, 2.439148f,
+    2.317213f, 2.266803f, 2.193323f, 2.100755f, 2.080360f, 2.198166f, 2.605405f, 3.051784f,
+    3.074054f, 3.130259f, 3.157256f, 3.154750f, 3.164451f, 3.112223f, 2.976078f, 2.828533f,
+    2.279205f, 1.703046f, 1.197010f, 0.931442f, 0.845105f, 1.544803f, 1.802673f, 1.400460f,
+    0.798539f, 0.916805f, 1.315934f, 1.523162f, 1.881476f, 2.143848f, 2.610810f, 3.106198f,
+    3.157555f, 3.216382f, 3.246782f, 3.253034f, 3.252252f, 3.246610f, 3.241533f, 3.221304f,
+};
+
+/*
+ * Displace every node's target line laterally from the authored centreline by the interpolated
+ * control offset, positive to the left of travel.
+ *
+ * The centreline itself is untouched: surface bands, barriers, gates, and the off-track metric
+ * all continue to measure against the authored geometry. Only the path a driver aims at moves.
+ */
+static void apply_racing_line_controls(Track *track, const float *controls, int controlCount)
+{
+    if (track == NULL || track->nodes == NULL || track->count < 3) return;
+    if (controls == NULL || controlCount < 2) return;
+
+    for (int i = 0; i < track->count; i++) {
+        const Vector2 prev = track->nodes[(i - 1 + track->count) % track->count].centerM;
+        const Vector2 next = track->nodes[(i + 1) % track->count].centerM;
+        const Vector2 tangent = { next.x - prev.x, next.y - prev.y };
+        const float tangentLength = sqrtf(tangent.x * tangent.x + tangent.y * tangent.y);
+        if (tangentLength <= 1.0e-6f) {
+            track->nodes[i].racingLineM = track->nodes[i].centerM;
+            continue;
+        }
+
+        const float phase = (float)i * (float)controlCount / (float)track->count;
+        const int lower = ((int)phase) % controlCount;
+        const int upper = (lower + 1) % controlCount;
+        const float fraction = phase - floorf(phase);
+        float offsetM = controls[lower] + (controls[upper] - controls[lower]) * fraction;
+
+        /* Whatever the optimiser produced, the road's own bound is the track's to enforce. The
+         * margin is half a car plus the tracking error a pure-pursuit driver shows on a curved
+         * line: put the target any closer to the edge and a slightly understeering car runs out
+         * of asphalt, which costs it more time than the shorter path ever saved. */
+        const float widthLimitM = track->nodes[i].halfWidthM - RACING_LINE_EDGE_MARGIN_M;
+        const float limitM = (widthLimitM > 0.0f) ? widthLimitM : 0.0f;
+        if (offsetM > limitM) offsetM = limitM;
+        if (offsetM < -limitM) offsetM = -limitM;
+
+        const Vector2 normal = { -tangent.y / tangentLength, tangent.x / tangentLength };
+        track->nodes[i].racingLineM =
+            (Vector2){ track->nodes[i].centerM.x + normal.x * offsetM,
+                       track->nodes[i].centerM.y + normal.y * offsetM };
+    }
 }
 
 void track_load_chicane(Track *track)
@@ -400,6 +491,80 @@ void track_load_chicane(Track *track)
     };
     memcpy(track->checkpoints, gates, sizeof(gates));
 
+    apply_racing_line_controls(track, chicaneRacingLineOffsetsM, RACING_LINE_CONTROL_COUNT);
+    track_reset_progress(track);
+}
+void track_load_sprint(Track *track)
+{
+    if (track == NULL) return;
+
+    /* Start from the authored chicane, then apply a fixed affine layout change to both the
+     * centreline and its gates. This keeps the route contract identical while exercising AI
+     * geometry following on a genuinely different footprint. */
+    track_load_chicane(track);
+    const float scaleX = 0.82f;
+    const float scaleY = 0.88f;
+    for (int i = 0; i < track->count; i++) {
+        track->nodes[i].centerM.x *= scaleX;
+        track->nodes[i].centerM.y *= scaleY;
+    }
+    for (int i = 0; i < track->checkpointCount; i++) {
+        track->checkpoints[i].centerM.x *= scaleX;
+        track->checkpoints[i].centerM.y *= scaleY;
+        const Vector2 forward = track->checkpoints[i].forwardUnit;
+        const float length = sqrtf((forward.x * scaleX) * (forward.x * scaleX) +
+                                   (forward.y * scaleY) * (forward.y * scaleY));
+        if (length > 1e-12f) {
+            track->checkpoints[i].forwardUnit =
+                (Vector2){ forward.x * scaleX / length, forward.y * scaleY / length };
+        }
+    }
+    snprintf(track->id, sizeof(track->id), "%s", "sprint");
+    snprintf(track->version, sizeof(track->version), "%s", "sprint_v1");
+    apply_racing_line_controls(track, sprintRacingLineOffsetsM, RACING_LINE_CONTROL_COUNT);
+    track_reset_progress(track);
+}
+void track_load_technical(Track *track)
+{
+    if (track == NULL) return;
+
+    /* The technical circuit keeps the authored route contract but compresses both axes, adds a
+     * small affine skew, and narrows every ribbon. The result has materially tighter curves and
+     * less recovery room than sprint_v1 while remaining a closed, collision-testable circuit. */
+    track_load_chicane(track);
+    const float scaleX = 0.62f;
+    const float scaleY = 0.58f;
+    const float skewX = 0.08f;
+    const float skewY = 0.05f;
+
+    for (int i = 0; i < track->count; i++) {
+        TrackNode *node = &track->nodes[i];
+        const Vector2 source = node->centerM;
+        node->centerM = (Vector2){ scaleX * source.x + skewX * source.y,
+                                   skewY * source.x + scaleY * source.y };
+        const bool wasChicane = node->halfWidthM <= CHICANE_HALF_WIDTH_M;
+        node->halfWidthM = wasChicane ? 4.5f : 5.8f;
+        node->runoffHalfWidthM = node->halfWidthM + (wasChicane ? 2.0f : 2.5f);
+    }
+    for (int i = 0; i < track->checkpointCount; i++) {
+        Checkpoint *checkpoint = &track->checkpoints[i];
+        const Vector2 source = checkpoint->centerM;
+        checkpoint->centerM = (Vector2){ scaleX * source.x + skewX * source.y,
+                                         skewY * source.x + scaleY * source.y };
+        const Vector2 forward = checkpoint->forwardUnit;
+        const Vector2 transformed = { scaleX * forward.x + skewX * forward.y,
+                                      skewY * forward.x + scaleY * forward.y };
+        const float length =
+            sqrtf(transformed.x * transformed.x + transformed.y * transformed.y);
+        if (length > 1.0e-12f) {
+            checkpoint->forwardUnit =
+                (Vector2){ transformed.x / length, transformed.y / length };
+        }
+        checkpoint->halfWidthM = 7.0f;
+    }
+    snprintf(track->id, sizeof(track->id), "%s", "technical");
+    snprintf(track->version, sizeof(track->version), "%s", "technical_v1");
+    apply_racing_line_controls(track, technicalRacingLineOffsetsM, RACING_LINE_CONTROL_COUNT);
     track_reset_progress(track);
 }
 
@@ -424,6 +589,9 @@ bool track_build_checkpoints_from_nodes(Track *track)
 
         track->checkpoints[i].centerM = node->centerM;
         track->checkpoints[i].halfWidthM = node->halfWidthM;
+        /* A hand-built ribbon has no learned line; its target path is the centreline it
+         * authored, which is what every consumer of racingLineM must be able to assume. */
+        track->nodes[i].racingLineM = node->centerM;
         track->checkpoints[i].required = true;
         /* A duplicated closing node leaves no direction to face; such a gate can never be
          * crossed, which is the same as the pre-existing behaviour for that degenerate case. */
@@ -433,26 +601,43 @@ bool track_build_checkpoints_from_nodes(Track *track)
     return true;
 }
 
-void track_reset_progress(Track *track)
+void track_reset_progress_at(Track *track, int startCheckpointIndex)
 {
     if (track == NULL) return;
     track->lap = 0;
     track->lapTimerS = 0.0f;
     track->lastLapTimeS = 0.0f;
-    /* A standing start puts the car ON the start/finish line. If gate 0 were still expected
-     * it would be scored in the first metre of travel and hand the car a free lap, so the
-     * next required gate is the one after it. */
-    track->nextCheckpoint = (track->checkpointCount > 1) ? 1 : 0;
+    if (track->checkpointCount <= 0) {
+        track->nextCheckpoint = 0;
+        track->lapStartCheckpoint = 0;
+        return;
+    }
+    if (startCheckpointIndex < 0 || startCheckpointIndex >= track->checkpointCount)
+        startCheckpointIndex = 0;
+    track->lapStartCheckpoint = startCheckpointIndex;
+    track->nextCheckpoint = (startCheckpointIndex + 1) % track->checkpointCount;
+}
+
+void track_reset_progress(Track *track)
+{
+    track_reset_progress_at(track, 0);
+}
+
+bool track_start_pose_at(const Track *track, int checkpointIndex, Vector2 *positionM,
+                         float *headingRad)
+{
+    if (track == NULL || track->checkpoints == NULL || track->checkpointCount <= 0)
+        return false;
+    if (checkpointIndex < 0 || checkpointIndex >= track->checkpointCount) return false;
+    const Checkpoint *start = &track->checkpoints[checkpointIndex];
+    if (positionM != NULL) *positionM = start->centerM;
+    if (headingRad != NULL) *headingRad = atan2f(start->forwardUnit.y, start->forwardUnit.x);
+    return true;
 }
 
 bool track_start_pose(const Track *track, Vector2 *positionM, float *headingRad)
 {
-    if (track == NULL || track->checkpoints == NULL || track->checkpointCount <= 0)
-        return false;
-    const Checkpoint *start = &track->checkpoints[0];
-    if (positionM != NULL) *positionM = start->centerM;
-    if (headingRad != NULL) *headingRad = atan2f(start->forwardUnit.y, start->forwardUnit.x);
-    return true;
+    return track_start_pose_at(track, 0, positionM, headingRad);
 }
 
 static uint32_t hash_f32(uint32_t h, float value)
@@ -475,6 +660,8 @@ uint32_t track_geometry_hash(const Track *track)
         const TrackNode *n = &track->nodes[i];
         h = hash_f32(h, n->centerM.x);
         h = hash_f32(h, n->centerM.y);
+        h = hash_f32(h, n->racingLineM.x);
+        h = hash_f32(h, n->racingLineM.y);
         h = hash_f32(h, n->halfWidthM);
         h = hash_f32(h, n->runoffHalfWidthM);
         h = hash_f32(h, (float)n->surfaceId);
@@ -564,8 +751,9 @@ TrackCheckpointEvent track_update_checkpoints(Track *track, Vector2 prevPosM, Ve
         track->nextCheckpoint = 0;
     }
 
-    /* Gate 0 is the start/finish, so taking it closes a lap. */
-    if (track->nextCheckpoint == 1 || track->checkpointCount == 1) {
+    /* A lap closes when the ordered route returns to the gate where this run started. */
+    const int lapCloseNext = (track->lapStartCheckpoint + 1) % track->checkpointCount;
+    if (track->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
         track->lap++;
         event.lapCompleted = true;
         event.lapTimeS = track->lapTimerS;

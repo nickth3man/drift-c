@@ -29,7 +29,9 @@
     "solved_long_accel_mps2,lateral_accel_mps2,aero_drag_n,aero_drag_x_n,aero_drag_y_n,"      \
     "rolling_resistance_n,rolling_resistance_x_n,rolling_resistance_y_n,"                     \
     "steering_input,throttle_input,brake_input,handbrake_input,"                              \
-    "surface_front_left,surface_front_right,surface_rear_left,surface_rear_right"
+    "surface_front_left,surface_front_right,surface_rear_left,surface_rear_right,"            \
+    "checkpoint_index,lap_index,lap_state,checkpoint_event,crash_lockout_s,"                  \
+    "distance_to_centerline_m,on_track"
 
 const char *telemetry_header(void)
 {
@@ -120,7 +122,7 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,"
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%" PRIu32 ","
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%"
-        ".6f,%.6f,%d,%d,%d,%d\n",
+        ".6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d\n",
         row->tick, row->timeS, (double)row->positionXM, (double)row->positionYM,
         (double)row->headingRad, (double)row->velocityLongitudinalMps,
         (double)row->velocityLateralMps, (double)row->speedMps, (double)row->yawRateRadS,
@@ -146,7 +148,9 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         (double)row->rollingResistanceXN, (double)row->rollingResistanceYN,
         (double)row->steeringInput, (double)row->throttleInput, (double)row->brakeInput,
         (double)row->handbrakeInput, row->surfaceFrontLeft, row->surfaceFrontRight,
-        row->surfaceRearLeft, row->surfaceRearRight);
+        row->surfaceRearLeft, row->surfaceRearRight, row->checkpointIndex, row->lapIndex,
+        row->lapState, row->checkpointEvent, (double)row->crashLockoutS,
+        (double)row->distanceToCenterlineM, row->onTrack);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;

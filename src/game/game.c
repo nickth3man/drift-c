@@ -128,6 +128,8 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     switch (config->track) {
         case GAME_TRACK_PARKING_LOT: track_init(&game->track); break;
         case GAME_TRACK_CHICANE: track_load_chicane(&game->track); break;
+        case GAME_TRACK_SPRINT: track_load_sprint(&game->track); break;
+        case GAME_TRACK_TECHNICAL: track_load_technical(&game->track); break;
         case GAME_TRACK_KEEP: break;
         default: return false;
     }
@@ -140,11 +142,16 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
 
 GAME_API bool game_spawn_on_track(Game *game)
 {
+    return game_spawn_on_track_at(game, 0);
+}
+
+GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
+{
     if (game == NULL) return false;
 
     Vector2 startM = { 0.0f, 0.0f };
     float headingRad = 0.0f;
-    if (!track_start_pose(&game->track, &startM, &headingRad)) return false;
+    if (!track_start_pose_at(&game->track, checkpointIndex, &startM, &headingRad)) return false;
 
     /* Reset first, then place: vehicle_state_reset() puts the car at the world origin, so
      * doing it the other way round would throw the pose away. */
@@ -159,7 +166,7 @@ GAME_API bool game_spawn_on_track(Game *game)
     game->renderState.prevHeadingRad = headingRad;
     game->renderState.currHeadingRad = headingRad;
 
-    track_reset_progress(&game->track);
+    track_reset_progress_at(&game->track, checkpointIndex);
     memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
     game->lastCheckpointEvent.index = -1;
 
@@ -377,12 +384,19 @@ GAME_API void game_fixed_update(Game *game, float dt)
          * kept for the tick so telemetry and the validation runner can record which gate was
          * taken, and whether it was taken out of order. */
         if (game->track.nodes != NULL && game->track.count > 0) {
-            game->lastCheckpointEvent = track_update_checkpoints(
-                &game->track, startPosM, game->renderState.currPositionM);
+            TrackCheckpointEvent ev = track_update_checkpoints(&game->track, startPosM,
+                                                               game->renderState.currPositionM);
+            game->lastCheckpointEvent = ev;
+            if (ev.crossed) {
+                game->pendingTelemetryCheckpointEvent = ev;
+            }
             game->track.lapTimerS += dt;
         } else {
             memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
             game->lastCheckpointEvent.index = -1;
+            memset(&game->pendingTelemetryCheckpointEvent, 0,
+                   sizeof(game->pendingTelemetryCheckpointEvent));
+            game->pendingTelemetryCheckpointEvent.index = -1;
         }
 
         /* Crash lockout timer: count down toward zero. */
@@ -488,3 +502,128 @@ GAME_API void game_shutdown(Game *game)
     DRIFTY_PROFILE_REPORT(stdout);
 }
 #endif
+
+/* Encode the most recent checkpoint event as the telemetry column's closed set:
+ * 0 none, 1 in-order crossing, 2 out-of-order crossing, 3 lap-completing crossing. */
+static int encode_checkpoint_event(const TrackCheckpointEvent *ev)
+{
+    if (!ev->crossed) return 0;
+    if (ev->lapCompleted) return 3;
+    if (ev->outOfOrder) return 2;
+    return 1;
+}
+
+GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
+{
+    TelemetryRow row;
+    memset(&row, 0, sizeof(row));
+    row.tick = game->sim.tick;
+    row.timeS = (double)game->sim.tick * (double)FIXED_DT_S;
+    row.positionXM = game->vehicle.positionM.x;
+    row.positionYM = game->vehicle.positionM.y;
+    row.headingRad = game->vehicle.headingRad;
+    row.velocityLongitudinalMps = game->vehicle.velocityLongitudinalMps;
+    row.velocityLateralMps = game->vehicle.velocityLateralMps;
+    row.speedMps = game->derived.speedMps;
+    row.yawRateRadS = game->vehicle.yawRateRadS;
+    row.steeringAngleRad = game->vehicle.frontRoadWheelAngleRad;
+    row.engineRpm = game->vehicle.engineRpm;
+    row.selectedGear = game->vehicle.selectedGear;
+    row.frontSlipAngleRad = game->derived.frontSlipAngleRad;
+    row.rearSlipAngleRad = game->derived.rearSlipAngleRad;
+    row.frontSlipRatio = 0.5f * (game->vehicle.wheels[WHEEL_FRONT_LEFT].slipRatio +
+                                 game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio);
+    row.rearSlipRatio = 0.5f * (game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio +
+                                game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio);
+    row.frontWheelOmegaRadS =
+        0.5f * (game->vehicle.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS +
+                game->vehicle.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS);
+    row.rearWheelOmegaRadS =
+        0.5f * (game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
+                game->vehicle.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS);
+    row.frontNormalLoadN = game->derived.normalLoadFrontN;
+    row.rearNormalLoadN = game->derived.normalLoadRearN;
+    row.frontFxPureN = game->derived.pureLongitudinalForceN[WHEEL_FRONT_LEFT] +
+                       game->derived.pureLongitudinalForceN[WHEEL_FRONT_RIGHT];
+    row.rearFxPureN = game->derived.pureLongitudinalForceN[WHEEL_REAR_LEFT] +
+                      game->derived.pureLongitudinalForceN[WHEEL_REAR_RIGHT];
+    row.frontFyPureN = game->derived.pureLateralForceN[WHEEL_FRONT_LEFT] +
+                       game->derived.pureLateralForceN[WHEEL_FRONT_RIGHT];
+    row.rearFyPureN = game->derived.pureLateralForceN[WHEEL_REAR_LEFT] +
+                      game->derived.pureLateralForceN[WHEEL_REAR_RIGHT];
+    row.frontFxLimitedN = game->vehicle.wheels[WHEEL_FRONT_LEFT].forceLongitudinalN +
+                          game->vehicle.wheels[WHEEL_FRONT_RIGHT].forceLongitudinalN;
+    row.rearFxLimitedN = game->vehicle.wheels[WHEEL_REAR_LEFT].forceLongitudinalN +
+                         game->vehicle.wheels[WHEEL_REAR_RIGHT].forceLongitudinalN;
+    row.frontFyLimitedN = game->derived.frontLateralForceN;
+    row.rearFyLimitedN = game->derived.rearLateralForceN;
+    row.frontFrictionUsage = fmaxf(game->vehicle.wheels[WHEEL_FRONT_LEFT].frictionUsage,
+                                   game->vehicle.wheels[WHEEL_FRONT_RIGHT].frictionUsage);
+    row.rearFrictionUsage = fmaxf(game->vehicle.wheels[WHEEL_REAR_LEFT].frictionUsage,
+                                  game->vehicle.wheels[WHEEL_REAR_RIGHT].frictionUsage);
+    row.frontLocked = game->vehicle.wheels[WHEEL_FRONT_LEFT].locked ||
+                      game->vehicle.wheels[WHEEL_FRONT_RIGHT].locked;
+    row.rearLocked = game->vehicle.wheels[WHEEL_REAR_LEFT].locked ||
+                     game->vehicle.wheels[WHEEL_REAR_RIGHT].locked;
+    row.driveTorqueNm = game->derived.driveTorqueNm[WHEEL_FRONT_LEFT] +
+                        game->derived.driveTorqueNm[WHEEL_FRONT_RIGHT] +
+                        game->derived.driveTorqueNm[WHEEL_REAR_LEFT] +
+                        game->derived.driveTorqueNm[WHEEL_REAR_RIGHT];
+    row.frontBrakeTorqueNm = game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
+                             game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];
+    row.rearBrakeTorqueNm = game->derived.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] +
+                            game->derived.serviceBrakeTorqueNm[WHEEL_REAR_RIGHT];
+    row.handbrakeTorqueNm = game->derived.handbrakeTorqueNm[WHEEL_REAR_LEFT] +
+                            game->derived.handbrakeTorqueNm[WHEEL_REAR_RIGHT];
+    row.totalForceXN = game->derived.totalBodyForceN.x;
+    row.totalForceYN = game->derived.totalBodyForceN.y;
+    row.yawTorqueNm = game->derived.totalYawTorqueNm;
+    row.bodySideslipRad = game->derived.bodySideslipRad;
+    row.lowSpeedBlend = game->derived.lowSpeedBlend;
+    row.substepCount = substepCount;
+    row.backlogDrops = game->physicsBacklogDrops;
+    row.stateChecksum = game->stateChecksum;
+
+    row.staticFrontLoadN = game->derived.staticFrontLoadN;
+    row.staticRearLoadN = game->derived.staticRearLoadN;
+    row.dynamicFrontLoadN = game->derived.normalLoadFrontN;
+    row.dynamicRearLoadN = game->derived.normalLoadRearN;
+    row.loadTransferN = game->derived.loadTransferN;
+    row.previousLongAccelMps2 = game->derived.previousLongAccelMps2;
+    row.filteredLongAccelMps2 = game->derived.filteredLongAccelMps2;
+    row.solvedLongAccelMps2 = game->derived.solvedLongAccelMps2;
+    row.lateralAccelMps2 = game->derived.lateralAccelerationMps2;
+    row.aeroDragN = game->derived.aeroDragMagnitudeN;
+    row.aeroDragXN = game->derived.aeroDragBodyN.x;
+    row.aeroDragYN = game->derived.aeroDragBodyN.y;
+    row.rollingResistanceN = game->derived.rollingResistanceMagnitudeN;
+    row.rollingResistanceXN = game->derived.rollingResistanceBodyN.x;
+    row.rollingResistanceYN = game->derived.rollingResistanceBodyN.y;
+
+    row.steeringInput = game->dev.appliedInput.steer;
+    row.throttleInput = game->dev.appliedInput.throttle;
+    row.brakeInput = game->dev.appliedInput.brake;
+    row.handbrakeInput = game->dev.appliedInput.handbrake;
+    row.surfaceFrontLeft = game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId;
+    row.surfaceFrontRight = game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId;
+    row.surfaceRearLeft = game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId;
+    row.surfaceRearRight = game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId;
+
+    /* Phase 5 lap-validation columns. */
+    row.checkpointIndex = game->track.nextCheckpoint;
+    row.lapIndex = game->track.lap;
+    row.lapState = (game->track.lap < 1) ? 0 : 1;
+    row.checkpointEvent = encode_checkpoint_event(&game->pendingTelemetryCheckpointEvent);
+    /* Consume the 60 Hz telemetry event latch so it is sampled exactly once into CSV/metrics. */
+    ((Game *)game)->pendingTelemetryCheckpointEvent.crossed = false;
+    row.crashLockoutS = game->crashLockoutTimerS;
+    row.distanceToCenterlineM =
+        track_distance_to_centerline_m(&game->track, game->vehicle.positionM, NULL);
+    row.onTrack = (game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId == SURFACE_ASPHALT &&
+                   game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId == SURFACE_ASPHALT &&
+                   game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId == SURFACE_ASPHALT &&
+                   game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId == SURFACE_ASPHALT)
+                      ? 1
+                      : 0;
+    return row;
+}

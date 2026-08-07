@@ -100,6 +100,18 @@ typedef struct {
     int surfaceFrontRight;
     int surfaceRearLeft;
     int surfaceRearRight;
+
+    /* Phase 5: lap-validation columns. Appended so every earlier column stays in place and
+     * in order; zero for runs that have no checkpointed track, which is why appending them
+     * cannot move a committed baseline. The metrics layer (validation_metrics.c) is a pure
+     * reducer over these. */
+    int checkpointIndex; /* next required gate, or the last one taken */
+    int lapIndex;        /* laps completed so far */
+    int lapState;        /* 0 out-lap / 1 timed / 2 complete / 3 aborted */
+    int checkpointEvent; /* 0 none / 1 in-order / 2 out-of-order / 3 lap-complete */
+    float crashLockoutS; /* seconds left in post-impact lockout; rising edge = collision */
+    float distanceToCenterlineM; /* nearest-segment distance, signed magnitude */
+    int onTrack;                 /* 1 iff all four wheels report the racing surface */
 } TelemetryRow;
 
 typedef struct {

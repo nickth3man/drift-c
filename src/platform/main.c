@@ -32,17 +32,26 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
+
+#include "platform/build_info.h"
 
 #include "raylib.h"
 
 #include "core/config.h"
 #include "dev/dev_scenario.h"
+#include "dev/dev_replay.h"
+#include "game/ai_driver.h"
+#include "game/car_roster.h"
 #include "game/game.h"
-#include "platform/hotreload.h"
 #include "game/input.h"
+#include "game/run_report.h"
+#include "game/validation_metrics.h"
+#include "platform/hotreload.h"
 #include "platform/timestep.h"
+#include "render/render.h"
 
 /* Bounded smoke-test duration: enough frames for the fixed-step loop and HUD to settle. */
 #define SMOKE_TEST_FRAMES 120
@@ -125,7 +134,6 @@ static void platform_fixed_update(void *ctx, float dt)
 {
     game_fixed_update((Game *)ctx, dt);
 }
-
 typedef struct {
     bool smokeTest;
     const char *captureScene;
@@ -134,10 +142,15 @@ typedef struct {
     int height;
     int ticks; /* -1: use the scene's own tick count */
     uint32_t seed;
-    int galleryPage;   /* 0: not a gallery capture; >=1: the 1-based page */
-    bool video;        /* --capture-scene writes an MP4 of every frame, not one PNG */
-    const char *track; /* NULL: leave whatever game_init() loaded */
-    float cameraZoom;  /* 0: leave the default; >0 overrides, for whole-track framing */
+    int galleryPage;     /* 0: not a gallery capture; >=1: the 1-based page */
+    bool video;          /* --capture-scene writes an MP4 of every frame, not one PNG */
+    const char *track;   /* NULL: leave whatever game_init() loaded */
+    float cameraZoom;    /* 0: leave the default; >0 overrides, for whole-track framing */
+    bool validateLap;    /* --validate-lap subcommand */
+    const char *carId;   /* --car ID */
+    int startCheckpoint; /* ordered checkpoint used as the standing-start pose */
+    bool noVideo;        /* --no-video flag */
+    bool listCars;       /* --list-cars flag */
 } Options;
 
 /*
@@ -155,12 +168,18 @@ static bool apply_run_options(Game *game, const Options *options)
     if (options->track != NULL) {
         if (strcmp(options->track, "chicane") == 0) {
             config.track = GAME_TRACK_CHICANE;
+        } else if (strcmp(options->track, "sprint") == 0) {
+            config.track = GAME_TRACK_SPRINT;
+        } else if (strcmp(options->track, "technical") == 0) {
+            config.track = GAME_TRACK_TECHNICAL;
         } else if (strcmp(options->track, "lot") == 0 ||
                    strcmp(options->track, "parking_lot") == 0) {
             config.track = GAME_TRACK_PARKING_LOT;
         } else {
-            fprintf(stderr, "error: unknown track '%s' (try 'chicane' or 'lot')\n",
-                    options->track);
+            fprintf(
+                stderr,
+                "error: unknown track '%s' (try 'chicane', 'sprint', 'technical', or 'lot')\n",
+                options->track);
             return false;
         }
     }
@@ -172,6 +191,10 @@ static void print_usage(const char *argv0)
     printf("usage: %s [--smoke-test]\n", argv0);
     printf("       %s --capture-scene NAME [--width W] [--height H] [--ticks N]\n", argv0);
     printf("               [--seed N] [--output PATH] [--video]\n");
+    printf("       %s --validate-lap [--car ID] [--track NAME] [--start-checkpoint N] "
+           "[--output DIR] [--no-video]\n",
+           argv0);
+    printf("       %s --list-cars\n", argv0);
     printf("       %s --list-scenes\n", argv0);
 }
 
@@ -189,6 +212,11 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     options->video = false;
     options->track = NULL;
     options->cameraZoom = 0.0f;
+    options->validateLap = false;
+    options->carId = NULL;
+    options->startCheckpoint = 0;
+    options->noVideo = false;
+    options->listCars = false;
     *statusOut = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -226,6 +254,16 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
             options->track = argv[++i];
         } else if (strcmp(arg, "--camera-zoom") == 0 && hasValue) {
             options->cameraZoom = (float)atof(argv[++i]);
+        } else if (strcmp(arg, "--validate-lap") == 0) {
+            options->validateLap = true;
+        } else if (strcmp(arg, "--car") == 0 && hasValue) {
+            options->carId = argv[++i];
+        } else if (strcmp(arg, "--start-checkpoint") == 0 && hasValue) {
+            options->startCheckpoint = atoi(argv[++i]);
+        } else if (strcmp(arg, "--no-video") == 0) {
+            options->noVideo = true;
+        } else if (strcmp(arg, "--list-cars") == 0) {
+            options->listCars = true;
         } else {
             fprintf(stderr, "error: unrecognised argument '%s'\n", arg);
             print_usage(argv[0]);
@@ -241,7 +279,6 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     }
     return true;
 }
-
 /*
  * Deterministic capture. The simulation is advanced with an exact fixed dt rather than
  * GetFrameTime(), so the image depends only on the scene, the tick count, and the build —
@@ -457,42 +494,337 @@ static int run_gallery(Game *game, const Options *options)
     return 0;
 }
 
+static int run_validate_lap(Game *game, const Options *options)
+{
+    const char *carId = (options->carId != NULL) ? options->carId : "rwd_grip";
+    const int carIndex = car_roster_find(carId);
+
+    const char *outDir =
+        (options->outputPath != NULL) ? options->outputPath : "artifacts/validation/latest";
+    char carDir[512];
+    snprintf(carDir, sizeof(carDir), "%s/%s", outDir, carId);
+    telemetry_ensure_dir(carDir);
+
+    char jsonPath[512], csvPath[512], videoPath[512], replayPath[512];
+    snprintf(jsonPath, sizeof(jsonPath), "%s/run.json", carDir);
+    snprintf(csvPath, sizeof(csvPath), "%s/telemetry.csv", carDir);
+    snprintf(videoPath, sizeof(videoPath), "%s/run.mp4", carDir);
+    snprintf(replayPath, sizeof(replayPath), "%s/replay.txt", carDir);
+
+    if (carIndex < 0) {
+        fprintf(stderr, "error: unknown car id '%s'\n", carId);
+        RunReportInput rep;
+        memset(&rep, 0, sizeof(rep));
+        rep.runId = "invalid_car";
+        rep.carId = carId;
+        rep.status = RUN_FAIL_SPEC_INVALID;
+        run_report_write(jsonPath, &rep);
+        return 2;
+    }
+
+    VehicleSpec spec;
+    if (!car_roster_spec(carIndex, &spec)) {
+        fprintf(stderr, "error: failed to build spec for car '%s'\n", carId);
+        RunReportInput rep;
+        memset(&rep, 0, sizeof(rep));
+        rep.runId = "invalid_spec";
+        rep.carId = carId;
+        rep.status = RUN_FAIL_SPEC_INVALID;
+        run_report_write(jsonPath, &rep);
+        return 2;
+    }
+
+    char specHashHex[16];
+    snprintf(specHashHex, sizeof(specHashHex), "%08x", car_roster_spec_hash(carIndex));
+
+    FILE *pipe = NULL;
+    if (!options->noVideo) {
+        char command[1024];
+        snprintf(command, sizeof(command),
+                 "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgba -s %dx%d -r %d -i - "
+                 "-an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p \"%s\"",
+                 options->width, options->height, VIDEO_FPS, videoPath);
+        pipe = _popen(command, "wb");
+        if (pipe == NULL) {
+            fprintf(stderr, "error: could not start ffmpeg for video encoding\n");
+            RunReportInput rep;
+            memset(&rep, 0, sizeof(rep));
+            rep.runId = "ffmpeg_failed";
+            rep.carId = carId;
+            rep.status = RUN_FAIL_VIDEO_ENCODE_FAILED;
+            run_report_write(jsonPath, &rep);
+            return 3;
+        }
+    }
+    game_init(game);
+    TelemetryWriter csvWriter;
+    const bool csvOpened = telemetry_open(&csvWriter, csvPath);
+    game_apply_spec(game, &spec);
+
+    GameRunConfig runConfig;
+    memset(&runConfig, 0, sizeof(runConfig));
+    runConfig.track = GAME_TRACK_CHICANE;
+    if (options->track != NULL) {
+        if (strcmp(options->track, "sprint") == 0) {
+            runConfig.track = GAME_TRACK_SPRINT;
+        } else if (strcmp(options->track, "technical") == 0) {
+            runConfig.track = GAME_TRACK_TECHNICAL;
+        } else if (strcmp(options->track, "chicane") != 0) {
+            fprintf(stderr, "error: unknown validation track '%s'\n", options->track);
+            return 2;
+        }
+    }
+    if (!game_configure_run(game, &runConfig) ||
+        !game_spawn_on_track_at(game, options->startCheckpoint)) {
+        fprintf(stderr, "error: invalid validation start checkpoint %d\n",
+                options->startCheckpoint);
+        return 2;
+    }
+
+    game->autoTrans.enabled = true;
+    game->autoTrans.forwardOnly = true;
+    game->state = STATE_PLAYING;
+    game->dev.uiDeterministic = true;
+
+    AiDriverConfig aiCfg;
+    ai_driver_config_default(&aiCfg);
+    AiDriverState aiState;
+    memset(&aiState, 0, sizeof(aiState));
+
+    const int budgetTicks = 14400; /* 120 s max */
+    const int maxRows = budgetTicks / VIDEO_TICKS_PER_FRAME;
+    TelemetryRow *rowsBuffer = (TelemetryRow *)calloc((size_t)maxRows, sizeof(TelemetryRow));
+
+    int rowCount = 0;
+    int ticksRun = 0;
+    int outOfOrder = 0;
+    bool allFinite = true;
+    bool writeFailed = false;
+
+    replay_begin_recording(&game->replay, game->sim.tick);
+
+    for (int t = 0; t < budgetTicks && game->track.lap < 2 && !writeFailed; t++) {
+        ai_driver_update(&aiCfg, &aiState, &game->track, &game->vehicle, &game->derived,
+                         &game->spec, &game->input, FIXED_DT_S);
+        game_fixed_update(game, FIXED_DT_S);
+        ticksRun++;
+
+        if (game->lastCheckpointEvent.outOfOrder) outOfOrder++;
+        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y))
+            allFinite = false;
+
+        if (ticksRun % VIDEO_TICKS_PER_FRAME == 0) {
+            TelemetryRow row = game_telemetry_row(game, 1);
+            if (rowCount < maxRows && rowsBuffer != NULL) {
+                rowsBuffer[rowCount++] = row;
+            }
+            if (csvOpened) {
+                telemetry_write_row(&csvWriter, &row);
+            }
+
+            if (pipe != NULL) {
+                ValidationOverlayData vod;
+                memset(&vod, 0, sizeof(vod));
+                vod.carId = carId;
+                vod.carDisplayName = car_roster_display_name(carIndex);
+                vod.elapsedS = (float)game->sim.tick * FIXED_DT_S;
+                vod.checkpointIndex = game->track.nextCheckpoint;
+                vod.checkpointTotal = game->track.checkpointCount;
+                vod.speedMps = game->derived.speedMps;
+                vod.lapState = (game->track.lap < 1) ? 0 : 1;
+                vod.isPassing = (outOfOrder == 0 && allFinite);
+                vod.steerInput = game->input.steer;
+                vod.throttleInput = game->input.throttle;
+                vod.brakeInput = game->input.brake;
+
+                game_draw(game, 0.0f);
+                render_draw_validation_overlay(&vod);
+
+                Image shot = LoadImageFromScreen();
+                if (shot.data == NULL) {
+                    writeFailed = true;
+                } else {
+                    const size_t bytes = (size_t)shot.width * (size_t)shot.height * 4u;
+                    if (fwrite(shot.data, 1, bytes, pipe) != bytes) writeFailed = true;
+                    UnloadImage(shot);
+                }
+            }
+        }
+    }
+
+    if (game->lastCheckpointEvent.crossed) {
+        TelemetryRow finalRow = game_telemetry_row(game, 1);
+        if (rowCount < maxRows && rowsBuffer != NULL) {
+            rowsBuffer[rowCount++] = finalRow;
+        }
+        if (csvOpened) {
+            telemetry_write_row(&csvWriter, &finalRow);
+        }
+        if (pipe != NULL) {
+            ValidationOverlayData vod;
+            memset(&vod, 0, sizeof(vod));
+            vod.carId = carId;
+            vod.carDisplayName = car_roster_display_name(carIndex);
+            vod.elapsedS = (float)game->sim.tick * FIXED_DT_S;
+            vod.checkpointIndex = game->track.nextCheckpoint;
+            vod.checkpointTotal = game->track.checkpointCount;
+            vod.speedMps = game->derived.speedMps;
+            vod.lapState = (game->track.lap < 1) ? 0 : 1;
+            vod.isPassing = (outOfOrder == 0 && allFinite);
+            vod.steerInput = game->input.steer;
+            vod.throttleInput = game->input.throttle;
+            vod.brakeInput = game->input.brake;
+
+            game_draw(game, 0.0f);
+            render_draw_validation_overlay(&vod);
+
+            Image shot = LoadImageFromScreen();
+            if (shot.data != NULL) {
+                const size_t bytes = (size_t)shot.width * (size_t)shot.height * 4u;
+                (void)fwrite(shot.data, 1, bytes, pipe);
+                UnloadImage(shot);
+            }
+        }
+    }
+
+    if (csvOpened) telemetry_close(&csvWriter);
+
+    int ffmpegStatus = 0;
+    if (pipe != NULL) {
+        ffmpegStatus = _pclose(pipe);
+    }
+
+    ValidationMetrics metrics;
+    if (rowsBuffer != NULL) {
+        validation_metrics_compute(rowsBuffer, rowCount, &metrics);
+    } else {
+        memset(&metrics, 0, sizeof(metrics));
+    }
+
+    RunStatus status = RUN_PASS;
+    if (!allFinite) {
+        status = RUN_FAIL_INVALID_STATE;
+    } else if (writeFailed || (pipe != NULL && ffmpegStatus != 0)) {
+        status = RUN_FAIL_VIDEO_ENCODE_FAILED;
+    } else if (outOfOrder > 0) {
+        status = RUN_FAIL_CHECKPOINT_OUT_OF_ORDER;
+    } else if (game->track.lap < 2) {
+        status = RUN_FAIL_CHECKPOINT_MISSED;
+    } else if (ticksRun >= budgetTicks) {
+        status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
+    }
+
+    char checksumHex[16];
+    snprintf(checksumHex, sizeof(checksumHex), "%08x", game->stateChecksum);
+
+    char geometryHashHex[16];
+    snprintf(geometryHashHex, sizeof(geometryHashHex), "%08x",
+             track_geometry_hash(&game->track));
+
+    bool replaySaved =
+        dev_replay_save(&game->replay, replayPath, "validate-lap", 0u, game->stateChecksum);
+
+    char runId[128];
+    snprintf(runId, sizeof(runId), "%s-%s-start%d", game->track.id, carId,
+             options->startCheckpoint);
+
+    RunReportInput rep;
+    memset(&rep, 0, sizeof(rep));
+    rep.runId = runId;
+    rep.carId = carId;
+    rep.carDisplayName = car_roster_display_name(carIndex);
+    rep.carDrivetrain = car_roster_layout_name(carIndex);
+    rep.carMassKg = (double)game->spec.massKg;
+    rep.carSpecHash = specHashHex;
+    rep.trackId = game->track.id;
+    rep.trackVersion = game->track.version;
+    rep.trackGeometryHash = geometryHashHex;
+    rep.trackCheckpointCount = game->track.checkpointCount;
+    rep.trackLengthM = (double)track_length_m(&game->track);
+    rep.startCheckpointIndex = options->startCheckpoint;
+    rep.fixedHz = FIXED_HZ;
+    rep.telemetryHz = VIDEO_FPS;
+    rep.videoFps = VIDEO_FPS;
+    rep.buildCommit = DRIFTY_BUILD_COMMIT;
+    rep.buildDirty =
+        (strcmp(DRIFTY_BUILD_DIRTY, "clean") != 0 && strcmp(DRIFTY_BUILD_DIRTY, "false") != 0);
+    rep.finalStateChecksum = checksumHex;
+    rep.tickBudget = budgetTicks;
+    rep.ticksRun = ticksRun;
+    rep.status = status;
+    rep.checkpointsPassed = metrics.checkpointsPassed;
+    rep.checkpointsMissed =
+        (status == RUN_PASS) ? 0 : (game->track.checkpointCount - metrics.checkpointsPassed);
+    rep.outOfOrderEvents = outOfOrder;
+    rep.metrics = &metrics;
+    rep.hasVideo = (!options->noVideo && pipe != NULL && !writeFailed);
+    rep.hasReplay = replaySaved;
+
+    run_report_write(jsonPath, &rep);
+
+    printf("VALIDATE: car=%s status=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
+           run_status_label(status), metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
+
+    free(rowsBuffer);
+    return (status == RUN_PASS) ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     Options options;
     int parseStatus = 0;
     if (!parse_options(argc, argv, &options, &parseStatus)) return parseStatus;
 
-    const bool smoke_test = options.smokeTest;
-    const bool capture = (options.captureScene != NULL);
-    const bool gallery = (options.galleryPage > 0);
-
-    Game *game = (Game *)calloc(1, sizeof(Game));
-    if (game == NULL) {
-        fprintf(stderr, "FATAL: could not allocate the Game block (%zu bytes)\n", sizeof(Game));
-        return 1;
-    }
-
     // cppcheck-suppress knownConditionTrueFalse
     if (!Game_LoadModule()) {
         fprintf(stderr, "FATAL: could not load the game module '%s'. Run build.bat first.\n",
                 GAME_MODULE_NAME);
-        free(game);
         return 1;
     }
 
-    const char *title = "Drifty - Phase 2";
-    if (smoke_test) title = "Drifty - Phase 2 smoke test";
-    if (capture) title = "Drifty - scene capture";
-    if (gallery) title = "Drifty - vehicle gallery";
+    if (options.listCars) {
+        const int count = car_roster_count();
+        for (int i = 0; i < count; i++) {
+            char id[64];
+            car_roster_id(i, id, sizeof(id));
+            printf("%s\n", id);
+        }
+        Game_UnloadModule();
+        return 0;
+    }
 
-    InitWindow(options.width, options.height, title);
-    if (!IsWindowReady()) {
-        fprintf(stderr, "FATAL: InitWindow failed (%dx%d)\n", options.width, options.height);
+    Game *game = (Game *)calloc(1, sizeof(Game));
+    if (game == NULL) {
+        fprintf(stderr, "FATAL: could not allocate the Game block (%zu bytes)\n", sizeof(Game));
+        Game_UnloadModule();
+        return 1;
+    }
+
+    if (options.validateLap) {
+        if (!options.noVideo) {
+            InitWindow(options.width, options.height, "Drifty - lap validation");
+            if (!IsWindowReady()) {
+                fprintf(stderr, "FATAL: InitWindow failed (%dx%d)\n", options.width,
+                        options.height);
+                Game_UnloadModule();
+                free(game);
+                return 1;
+            }
+            SetTargetFPS(0);
+        }
+        const int status = run_validate_lap(game, &options);
+        if (!options.noVideo) {
+            CloseWindow();
+        }
+        game_shutdown(game);
         Game_UnloadModule();
         free(game);
-        return 1;
+        return status;
     }
+
+    const bool smoke_test = options.smokeTest;
+    const bool capture = (options.captureScene != NULL);
+    const bool gallery = (options.galleryPage > 0);
 
     /*
      * Bounded capture modes are offline renders, not playback: the frame limiter would pace

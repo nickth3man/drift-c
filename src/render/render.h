@@ -5,13 +5,30 @@
 #define DRIFTY_RENDER_H
 
 #include "physics/vehicle.h"
+#include "platform/hotreload.h"
 
 typedef struct {
     Vector2 positionM;
     float headingRad;
     float wheelAngleRad[WHEEL_COUNT];
 } VehicleDrawState;
+typedef struct ValidationOverlayData {
+    const char *carId;
+    const char *carDisplayName;
+    float elapsedS;
+    int checkpointIndex;
+    int checkpointTotal;
+    float speedMps;
+    int lapState;        /* 0 OUT-LAP, 1 TIMED, 2 COMPLETE, 3 FAILED */
+    bool isPassing;      /* true if running attempt has no violations */
+    float steerInput;    /* -1..+1 */
+    float throttleInput; /* 0..1 */
+    float brakeInput;    /* 0..1 */
+} ValidationOverlayData;
 
+#if !defined(DRIFTY_HOT_RELOAD) || defined(DRIFTY_GAME_MODULE)
+GAME_API void render_draw_validation_overlay(const ValidationOverlayData *data);
+#endif
 struct Game;
 
 VehicleDrawState render_interpolate_vehicle(const VehicleRenderState *state, float alpha);

@@ -39,7 +39,8 @@
 #include "physics/physics.h"
 #include "render/render.h"
 #include "game/replay.h"
-#include "game/telemetry.h"
+#include "game/validation_metrics.h"
+#include "game/run_report.h"
 #include "platform/timestep.h"
 #include "physics/tire.h"
 #include "core/units.h"
@@ -142,8 +143,26 @@ static void scenario_telemetry(void)
 
             char expectedTail[32];
             snprintf(expectedTail, sizeof(expectedTail), ",%u", checksum);
-            check(strstr(lastLine, expectedTail) != NULL,
-                  "the final row carries the run's final state checksum (%u)", checksum);
+
+            /* Phase 5: the header and every data row carry the same column count, and the
+             * lap-validation columns are present by name. `line` was overwritten by the read
+             * loop, so the header comes from telemetry_header() and the data row from lastLine. */
+            {
+                const char *header = telemetry_header();
+                long headerCommas = 0;
+                for (const char *p = header; *p != '\0'; p++)
+                    if (*p == ',') headerCommas++;
+                long tailCommas = 0;
+                for (const char *p = lastLine; *p != '\0'; p++)
+                    if (*p == ',') tailCommas++;
+                check(headerCommas == tailCommas,
+                      "header and data row agree on column count (%ld commas)", headerCommas);
+                check(strstr(header, "checkpoint_index") != NULL &&
+                          strstr(header, "lap_state") != NULL &&
+                          strstr(header, "on_track") != NULL &&
+                          strstr(header, "distance_to_centerline_m") != NULL,
+                      "the Phase 5 lap-validation columns are in the header");
+            }
         }
     }
 
@@ -166,6 +185,195 @@ static void scenario_telemetry(void)
     free(game);
     free(repeatGame);
     free(frames);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: run-report — validation metrics + run.json writer                            */
+/* ------------------------------------------------------------------------------------- */
+
+/* A hand-built row stream whose metrics are computed by hand below. dt is 0.1 s between
+ * rows so the interval detectors have unambiguous durations to reason about. */
+static void build_report_fixture(TelemetryRow *rows)
+{
+    memset(rows, 0, sizeof(TelemetryRow) * 6);
+    const float fuLimit = 0.99f;
+    const float fuLow = 0.50f;
+
+    for (int i = 0; i < 6; i++) {
+        rows[i].tick = (uint64_t)i;
+        rows[i].timeS = (double)i * 0.1;
+    }
+
+    rows[0].speedMps = 10.0f;
+    rows[0].yawRateRadS = 0.5f;
+    rows[0].solvedLongAccelMps2 = 2.0f;
+    rows[0].lateralAccelMps2 = 1.0f;
+    rows[0].frontFrictionUsage = fuLow;
+    rows[0].rearFrictionUsage = fuLow;
+    rows[0].onTrack = 1;
+    rows[1].speedMps = 12.0f;
+    rows[1].yawRateRadS = 0.5f;
+    rows[1].solvedLongAccelMps2 = 2.0f;
+    rows[1].lateralAccelMps2 = 1.0f;
+    rows[1].frontFrictionUsage = 0.6f;
+    rows[1].rearFrictionUsage = 0.6f;
+    rows[1].onTrack = 1;
+    rows[1].crashLockoutS = 0.4f;
+    rows[1].checkpointEvent = 1;
+    rows[2].speedMps = 20.0f;
+    rows[2].yawRateRadS = 1.0f;
+    rows[2].solvedLongAccelMps2 = 3.0f;
+    rows[2].lateralAccelMps2 = 2.0f;
+    rows[2].frontFrictionUsage = fuLimit;
+    rows[2].rearFrictionUsage = fuLimit;
+    rows[2].onTrack = 1;
+    rows[2].crashLockoutS = 0.3f;
+    rows[2].bodySideslipRad = 1.6f;
+    rows[3].speedMps = 20.0f;
+    rows[3].yawRateRadS = 1.0f;
+    rows[3].solvedLongAccelMps2 = 3.0f;
+    rows[3].lateralAccelMps2 = 2.0f;
+    rows[3].frontFrictionUsage = fuLimit;
+    rows[3].rearFrictionUsage = fuLimit;
+    rows[3].onTrack = 0;
+    rows[3].crashLockoutS = 0.2f;
+    rows[3].bodySideslipRad = 1.6f;
+    rows[4].speedMps = 20.0f;
+    rows[4].yawRateRadS = 1.0f;
+    rows[4].solvedLongAccelMps2 = 3.0f;
+    rows[4].lateralAccelMps2 = 2.0f;
+    rows[4].frontFrictionUsage = fuLimit;
+    rows[4].rearFrictionUsage = fuLimit;
+    rows[4].onTrack = 0;
+    rows[4].crashLockoutS = 0.1f;
+    rows[4].bodySideslipRad = 1.6f;
+    rows[5].speedMps = 20.0f;
+    rows[5].yawRateRadS = 0.5f;
+    rows[5].solvedLongAccelMps2 = 3.0f;
+    rows[5].lateralAccelMps2 = 2.0f;
+    rows[5].frontFrictionUsage = fuLow;
+    rows[5].rearFrictionUsage = fuLow;
+    rows[5].onTrack = 1;
+    rows[5].checkpointEvent = 3;
+}
+
+static void scenario_run_report(void)
+{
+    TelemetryRow rows[6];
+    build_report_fixture(rows);
+
+    ValidationMetrics m;
+    validation_metrics_compute(rows, 6, &m);
+
+    /* Hand-computed: speeds [10,12,20,20,20,20], dt 0.1. */
+    check_near(m.maxSpeedMps, 20.0, 1e-6, "max speed is 20 m/s");
+    check_near(m.meanSpeedMps, 17.0, 1e-6, "mean speed is 102/6 = 17 m/s");
+    check_near(m.minMovingSpeedMps, 10.0, 1e-6, "min moving speed is 10 m/s");
+    check_near(m.medianSpeedMps, 20.0, 1e-6, "median speed is 20 m/s");
+    check_near(m.maxAbsSideslipRad, 1.6, 1e-6, "max |sideslip| is 1.6 rad");
+    check_near(m.maxYawRateRadS, 1.0, 1e-6, "max |yaw rate| is 1.0 rad/s");
+    check_near(m.maxFrictionUsage, 0.99, 1e-6, "max friction usage is 0.99");
+    check_near(m.timeAtFrictionLimitS, 0.3, 1e-6, "0.3 s at the friction limit (rows 2-4)");
+    check_near(m.maxLongAccelMps2, 3.0, 1e-6, "max long accel is 3.0 m/s^2");
+    check_near(m.minLongAccelMps2, 2.0, 1e-6, "min long accel is 2.0 m/s^2");
+    check_near(m.maxAbsLatAccelMps2, 2.0, 1e-6, "max |lat accel| is 2.0 m/s^2");
+    check_near(m.timeBelow5mpsS, 0.0, 1e-6, "no time below 5 m/s");
+
+    /* One collision: the lockout timer's 0 -> 0.4 rising edge at row 1. */
+    check(m.collisions == 1, "exactly one collision (rising edge at row 1; got %d)",
+          m.collisions);
+    /* One spin: rows 2-4 hold the attitude for 0.3 s >= 0.25 s. */
+    check(m.spinEvents == 1, "exactly one spin event (0.3 s >= 0.25 s; got %d)", m.spinEvents);
+    /* One off-track: rows 3-4 off-racing-surface for 0.2 s >= 0.1 s. */
+    check(m.offTrackEvents == 1, "exactly one off-track event (0.2 s >= 0.1 s; got %d)",
+          m.offTrackEvents);
+    check_near(m.offTrackTimeS, 0.2, 1e-6, "0.2 s spent off the racing surface");
+    /* Checkpoints: row 1 in-order, row 5 lap-complete. */
+    check(m.checkpointsPassed == 2, "two checkpoint crossings counted (got %d)",
+          m.checkpointsPassed);
+    check(m.outOfOrderEvents == 0, "no out-of-order crossings (got %d)", m.outOfOrderEvents);
+    /* Out-lap completes at row 5 (the only lap-complete event). */
+    check_near(m.outLapTimeS, 0.5, 1e-6, "out-lap time is 0.5 s");
+
+    /* Empty input is safe. */
+    ValidationMetrics zero;
+    validation_metrics_compute(NULL, 0, &zero);
+    check(zero.rowCount == 0, "a NULL/empty input reduces to zero metrics");
+
+    /* run.json: a failing run carries the injected reason and every required key. */
+    RunReportInput in;
+    memset(&in, 0, sizeof(in));
+    in.runId = "20260807-000000-chicane_v1-rwd_grip";
+    in.carId = "rwd_grip";
+    in.carDisplayName = "RWD Grip";
+    in.carDrivetrain = "RWD";
+    in.carMassKg = 1220.0;
+    in.carSpecHash = "deadbeef";
+    in.trackId = "chicane";
+    in.trackVersion = "chicane_v1";
+    in.trackGeometryHash = "cafebabe";
+    in.trackCheckpointCount = 8;
+    in.trackLengthM = 642.0;
+    in.fixedHz = 120;
+    in.telemetryHz = 60;
+    in.videoFps = 60;
+    in.buildCommit = "abc1234";
+    in.buildDirty = false;
+    in.finalStateChecksum = "11223344";
+    in.tickBudget = 14400;
+    in.ticksRun = 8460;
+    in.metrics = &m;
+    in.hasVideo = true;
+    in.hasReplay = true;
+
+    /* Injected failure: one checkpoint was missed. */
+    in.status = RUN_FAIL_CHECKPOINT_MISSED;
+    in.checkpointsPassed = 7;
+    in.checkpointsMissed = 1;
+    in.outOfOrderEvents = 0;
+
+    const char *failPath = TELEMETRY_DIR "/run_report_fail.json";
+    check(run_report_write(failPath, &in), "run_report_write succeeded for a failing run");
+
+    char buf[8192];
+    FILE *f = fopen(failPath, "rb");
+    check(f != NULL, "the failing run.json can be reopened");
+    if (f != NULL) {
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[n] = '\0';
+        fclose(f);
+        check(strstr(buf, "\"schema_version\"") != NULL, "run.json carries schema_version");
+        check(strstr(buf, "\"run_id\"") != NULL, "run.json carries run_id");
+        check(strstr(buf, "\"car\"") != NULL && strstr(buf, "\"rwd_grip\"") != NULL,
+              "run.json carries the car block");
+        check(strstr(buf, "\"track\"") != NULL && strstr(buf, "\"chicane_v1\"") != NULL,
+              "run.json carries the track block");
+        check(strstr(buf, "\"sim\"") != NULL && strstr(buf, "\"abc1234\"") != NULL,
+              "run.json carries the sim block with the build commit");
+        check(strstr(buf, "\"metrics\"") != NULL, "run.json carries the metrics block");
+        check(strstr(buf, "\"artifacts\"") != NULL, "run.json carries the artifacts block");
+        check(strstr(buf, "\"status\": \"FAIL\"") != NULL, "a failed run reports status FAIL");
+        check(strstr(buf, "\"checkpoint_missed\"") != NULL,
+              "the injected failure reason is present");
+        check(strstr(buf, "\"checkpoints_missed\": 1") != NULL,
+              "the missed-checkpoint count is present");
+    }
+
+    /* A passing run reports PASS and a null failure_reason. */
+    in.status = RUN_PASS;
+    in.checkpointsPassed = 8;
+    in.checkpointsMissed = 0;
+    const char *passPath = TELEMETRY_DIR "/run_report_pass.json";
+    check(run_report_write(passPath, &in), "run_report_write succeeded for a passing run");
+    f = fopen(passPath, "rb");
+    if (f != NULL) {
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[n] = '\0';
+        fclose(f);
+        check(strstr(buf, "\"status\": \"PASS\"") != NULL, "a passing run reports status PASS");
+        check(strstr(buf, "\"failure_reason\": null") != NULL,
+              "a passing run has a null failure_reason");
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -2850,6 +3058,8 @@ static const TestScenario kPhysicsScenarios[] = {
     { "drivetrain-layout", "RWD/FWD/AWD torque routing and slip-ratio differential ordering",
       scenario_drivetrain_layout },
     { "roster", "6-car roster: validity, unique ids, profile round-trip", scenario_roster },
+    { "run-report", "validation metrics reduction and run.json output contract",
+      scenario_run_report },
 };
 
 TestScenarioGroup test_physics_scenarios(void)

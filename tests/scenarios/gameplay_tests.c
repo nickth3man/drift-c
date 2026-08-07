@@ -18,6 +18,7 @@
 
 #include "dev/car_corpus.h"
 #include "game/ai_driver.h"
+#include "game/car_roster.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -360,10 +361,10 @@ static void scenario_collision_units(void)
      *     These are DIFFERENT walls with opposing push normals, so both resolve. */
     {
         TrackNode corridorNodes[4] = {
-            { { -50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f },
-            { { 50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f },
-            { { 50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f },
-            { { -50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f },
+            { { -50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f, { -50, 0 } },
+            { { 50, 0 }, 1.5f, SURFACE_ASPHALT, 0.0f, { 50, 0 } },
+            { { 50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f, { 50, 100 } },
+            { { -50, 100 }, 50.0f, SURFACE_ASPHALT, 0.0f, { -50, 100 } },
         };
         Track corridor = { 0 };
         corridor.nodes = corridorNodes;
@@ -442,10 +443,10 @@ static void scenario_collision_units(void)
      *    near the narrow end collides under per-node interpolation. */
     {
         TrackNode vwNodes[4] = {
-            { { 0, 0 }, 5.0f, SURFACE_ASPHALT, 0.0f },
-            { { 10, 0 }, 10.0f, SURFACE_ASPHALT, 0.0f },
-            { { 10, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f },
-            { { 0, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f },
+            { { 0, 0 }, 5.0f, SURFACE_ASPHALT, 0.0f, { 0, 0 } },
+            { { 10, 0 }, 10.0f, SURFACE_ASPHALT, 0.0f, { 10, 0 } },
+            { { 10, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f, { 10, 100 } },
+            { { 0, 100 }, 100.0f, SURFACE_ASPHALT, 0.0f, { 0, 100 } },
         };
         Track vwTrack = { 0 };
         vwTrack.nodes = vwNodes;
@@ -524,10 +525,13 @@ static void scenario_checkpoint_lap(void)
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
     track.runoffSurfaceId = SURFACE_GRASS;
-    track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 0.0f, 0.0f } };
+    track.nodes[1] =
+        (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 10.0f, 0.0f } };
+    track.nodes[2] =
+        (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 10.0f, 10.0f } };
+    track.nodes[3] =
+        (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 0.0f, 10.0f } };
     check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
     check(track.checkpointCount == 4, "one gate per node (got %d)", track.checkpointCount);
     track.nextCheckpoint = 0;
@@ -776,6 +780,42 @@ static void scenario_chicane_track(void)
         track_free(&again);
     }
 
+    /* --- The technical layout is a distinct, tighter authored circuit. --- */
+    {
+        Track technical;
+        memset(&technical, 0, sizeof(technical));
+        track_load_technical(&technical);
+        check(technical.nodes != NULL && technical.count == track.count,
+              "technical track keeps the sampled route (%d nodes)", technical.count);
+        check(strcmp(technical.id, "technical") == 0, "technical track carries its id (%s)",
+              technical.id);
+        check(strcmp(technical.version, "technical_v1") == 0,
+              "technical track carries its version (%s)", technical.version);
+        check(track_geometry_hash(&technical) != track_geometry_hash(&track),
+              "technical geometry hash differs from chicane");
+        check(track_length_m(&technical) < track_length_m(&track) * 0.80f,
+              "technical lap is materially shorter and tighter (%.1f m vs %.1f m)",
+              (double)track_length_m(&technical), (double)track_length_m(&track));
+
+        float narrowestHalfWidthM = 1.0e9f;
+        for (int i = 0; i < technical.count; i++) {
+            if (technical.nodes[i].halfWidthM < narrowestHalfWidthM)
+                narrowestHalfWidthM = technical.nodes[i].halfWidthM;
+        }
+        check(narrowestHalfWidthM < 5.0f, "technical track narrows the racing surface (%.1f m)",
+              (double)narrowestHalfWidthM);
+        check(technical.checkpointCount == 8,
+              "technical track preserves eight required gates (%d)", technical.checkpointCount);
+
+        Vector2 startM = { 0.0f, 0.0f };
+        float headingRad = 0.0f;
+        check(track_start_pose(&technical, &startM, &headingRad),
+              "technical track reports a standing start pose");
+        check(Track_SurfaceAt(&technical, startM) == SURFACE_ASPHALT,
+              "technical start pose is on the racing surface");
+        track_free(&technical);
+    }
+
     track_free(&track);
     check(track.checkpoints == NULL && track.checkpointCount == 0,
           "track_free releases the gate array too");
@@ -832,6 +872,8 @@ static void scenario_ai_lap(void)
     bool allFinite = true;
     bool handbrakeEverSet = false;
     bool bothPedalsEverSet = false;
+    int fullThrottleTicks = 0;
+    int brakingTicks = 0;
     float prevLockoutS = 0.0f;
 
     for (int tick = 0; tick < budgetTicks && game->track.lap < targetLaps; tick++) {
@@ -840,6 +882,8 @@ static void scenario_ai_lap(void)
 
         if (game->input.handbrake != 0.0f) handbrakeEverSet = true;
         if (game->input.throttle > 0.0f && game->input.brake > 0.0f) bothPedalsEverSet = true;
+        if (game->input.throttle >= 0.999f) fullThrottleTicks++;
+        if (game->input.brake > 0.0f) brakingTicks++;
 
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
@@ -856,7 +900,10 @@ static void scenario_ai_lap(void)
         if (game->crashLockoutTimerS > prevLockoutS) collisions++;
         prevLockoutS = game->crashLockoutTimerS;
 
-        if (fabsf(ai.crossTrackErrorM) > maxCrossTrackM)
+        /* The car spawns on the gate centre, which is ON THE CENTRELINE, while the target is
+         * the offset racing line — so the first second is a legitimate acquisition transient,
+         * not a tracking failure. Measure the control law once it is established. */
+        if (tick > 240 && fabsf(ai.crossTrackErrorM) > maxCrossTrackM)
             maxCrossTrackM = fabsf(ai.crossTrackErrorM);
         if (game->derived.speedMps > maxSpeedMps) maxSpeedMps = game->derived.speedMps;
         speedSumMps += game->derived.speedMps;
@@ -887,6 +934,10 @@ static void scenario_ai_lap(void)
     printf("    ai-lap           peak friction usage %.3f  grip-limited %.1f%% of the lap\n",
            (double)peakFrictionUsage,
            100.0 * (double)ticksNearLimit / (double)(ticksRun ? ticksRun : 1));
+    check(fullThrottleTicks > ticksRun / 4,
+          "the driver uses full throttle whenever the speed envelope permits (%d/%d ticks)",
+          fullThrottleTicks, ticksRun);
+    check(brakingTicks > 0, "the driver brakes for upcoming curvature instead of coasting");
 
     /* --- What the driver is contractually forbidden from doing --- */
     check(!handbrakeEverSet, "the driver never pulls the handbrake");
@@ -902,10 +953,18 @@ static void scenario_ai_lap(void)
           "exactly %d gate crossings for %d laps (got %d)",
           targetLaps * game->track.checkpointCount, targetLaps, gatesTaken);
 
-    /* The racing surface is 6 m half-width through the chicane and 8 m elsewhere, so a driver
-     * that stays within 4 m of the centreline is on the road everywhere on the circuit. */
-    check(maxCrossTrackM < 4.0f, "the driver holds the line within 4 m (peak %.2f m)",
+    /* Two separate claims, now that the target is the learned line rather than the centreline:
+     * the driver TRACKS its target, and it stays on the ROAD. The second is no longer implied
+     * by the first, because the target line is itself displaced from the centreline.
+     *
+     * The tracking bound is the geometry's, not a taste: the narrowest racing surface on the
+     * circuit is 6 m half-width, so a driver whose error exceeds 4 m is no longer following a
+     * line — it is somewhere else on the road, or off it. */
+    check(maxCrossTrackM < 4.0f,
+          "the driver holds the learned racing line within 4 m (peak %.2f m)",
           (double)maxCrossTrackM);
+    check(offTrackTicks == 0, "the driver never left the racing surface (%d ticks)",
+          offTrackTicks);
     check(collisions == 0, "the driver never touched a barrier (%d contacts)", collisions);
 
     /* A driver that crawls proves nothing about the car, so the pace has to be real. Speed
@@ -947,6 +1006,325 @@ static void scenario_ai_lap(void)
 
     track_free(&game->track);
     free(game);
+}
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: ai-no-privilege — per-tick checksum parity between live AI and input replay  */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_ai_no_privilege(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    track_load_chicane(&game->track);
+    game_spawn_on_track(game);
+
+    game->autoTrans.enabled = true;
+    game->autoTrans.forwardOnly = true;
+    game->state = STATE_PLAYING;
+
+    AiDriverConfig cfg;
+    ai_driver_config_default(&cfg);
+    AiDriverState ai;
+    memset(&ai, 0, sizeof(ai));
+
+    const int runTicks = 3600; /* 30 s of driving */
+    uint32_t *checksums = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)runTicks);
+    check(checksums != NULL, "checksum buffer allocated");
+    if (checksums == NULL) {
+        free(game);
+        return;
+    }
+
+    replay_begin_recording(&game->replay, game->sim.tick);
+
+    for (int t = 0; t < runTicks; t++) {
+        ai_driver_update(&cfg, &ai, &game->track, &game->vehicle, &game->derived, &game->spec,
+                         &game->input, FIXED_DT_S);
+        game_fixed_update(game, FIXED_DT_S);
+        checksums[t] = game->stateChecksum;
+    }
+
+    /* Replay the recorded inputs tick-by-tick and verify per-tick state checksum parity. */
+    Game *repeat = alloc_game();
+    game_init(repeat);
+    track_load_chicane(&repeat->track);
+    game_spawn_on_track(repeat);
+    repeat->autoTrans.enabled = true;
+    repeat->autoTrans.forwardOnly = true;
+    repeat->state = STATE_PLAYING;
+
+    repeat->replay = game->replay;
+    check(replay_begin_playback(&repeat->replay), "replay_begin_playback succeeded");
+
+    int mismatches = 0;
+    for (int t = 0; t < runTicks; t++) {
+        input_zero(&repeat->input);
+        game_fixed_update(repeat, FIXED_DT_S);
+        if (repeat->stateChecksum != checksums[t]) mismatches++;
+    }
+
+    check(
+        mismatches == 0,
+        "AI driver has no side channels: %d / %d ticks match replay checksum byte-identically",
+        runTicks - mismatches, runTicks);
+
+    free(checksums);
+    track_free(&repeat->track);
+    free(repeat);
+    track_free(&game->track);
+    free(game);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: ai-roster-laps — uniform AiDriverConfig completes 2 laps across all 6 cars  */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_ai_roster_laps(void)
+{
+    AiDriverConfig cfg;
+    ai_driver_config_default(&cfg);
+
+    const int rosterCount = car_roster_count();
+    check(rosterCount == 6, "car roster holds 6 cars");
+
+    for (int i = 0; i < rosterCount; i++) {
+        VehicleSpec spec;
+        check(car_roster_spec(i, &spec), "roster spec %d built successfully", i);
+
+        char carId[64];
+        car_roster_id(i, carId, sizeof(carId));
+
+        Game *game = alloc_game();
+        game_init(game);
+        game_apply_spec(game, &spec);
+        track_load_chicane(&game->track);
+        game_spawn_on_track(game);
+
+        game->autoTrans.enabled = true;
+        game->autoTrans.forwardOnly = true;
+        game->state = STATE_PLAYING;
+
+        AiDriverState ai;
+        memset(&ai, 0, sizeof(ai));
+
+        const int budgetTicks = 14400; /* 120 s max */
+        int outOfOrder = 0;
+        bool allFinite = true;
+        int ticksRun = 0;
+
+        for (int t = 0; t < budgetTicks && game->track.lap < 2; t++) {
+            ai_driver_update(&cfg, &ai, &game->track, &game->vehicle, &game->derived,
+                             &game->spec, &game->input, FIXED_DT_S);
+            game_fixed_update(game, FIXED_DT_S);
+            ticksRun++;
+
+            if (game->lastCheckpointEvent.outOfOrder) outOfOrder++;
+            if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y))
+                allFinite = false;
+        }
+        check(allFinite, "car '%s' simulation stayed finite", carId);
+        check(game->track.lap >= 2, "car '%s' completed 2 laps (got %d in %d ticks)", carId,
+              game->track.lap, ticksRun);
+        check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
+              outOfOrder);
+
+        track_free(&game->track);
+        free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: racing-line — the learned target line is valid, and it is faster              */
+/* ------------------------------------------------------------------------------------- */
+
+/* Total path length of the target racing line, metres. */
+static float racing_line_length_m(const Track *track)
+{
+    float total = 0.0f;
+    for (int i = 0; i < track->count; i++) {
+        const Vector2 a = track->nodes[i].racingLineM;
+        const Vector2 b = track->nodes[(i + 1) % track->count].racingLineM;
+        total += sqrtf((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+    }
+    return total;
+}
+
+/* Load one of the three authored validation circuits by index. */
+static void load_validation_track(int which, Track *track)
+{
+    if (which == 0)
+        track_load_chicane(track);
+    else if (which == 1)
+        track_load_sprint(track);
+    else
+        track_load_technical(track);
+}
+
+/* Closest approach of the target line to a point, metres. */
+static float racing_line_distance_to(const Track *track, Vector2 pointM)
+{
+    float best = 1.0e9f;
+    for (int i = 0; i < track->count; i++) {
+        const Vector2 a = track->nodes[i].racingLineM;
+        const Vector2 b = track->nodes[(i + 1) % track->count].racingLineM;
+        const float abx = b.x - a.x, aby = b.y - a.y;
+        const float lenSq = abx * abx + aby * aby;
+        float t = 0.0f;
+        if (lenSq > 1.0e-9f) {
+            t = ((pointM.x - a.x) * abx + (pointM.y - a.y) * aby) / lenSq;
+            t = (t < 0.0f) ? 0.0f : ((t > 1.0f) ? 1.0f : t);
+        }
+        const float dx = pointM.x - (a.x + abx * t);
+        const float dy = pointM.y - (a.y + aby * t);
+        const float d = sqrtf(dx * dx + dy * dy);
+        if (d < best) best = d;
+    }
+    return best;
+}
+
+/* Drive two laps with the shared AI and report the timed (second) lap. Returns -1 on failure.
+ * `useCentreline` collapses the target line back onto the authored centreline, which is the
+ * control condition the learned line has to beat. */
+static float drive_timed_lap_s(int which, bool useCentreline, int *gatesTakenOut,
+                               int *outOfOrderOut, int *offTrackTicksOut)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    load_validation_track(which, &game->track);
+    if (useCentreline) {
+        for (int i = 0; i < game->track.count; i++)
+            game->track.nodes[i].racingLineM = game->track.nodes[i].centerM;
+    }
+    game_spawn_on_track_at(game, 3);
+    game->autoTrans.enabled = true;
+    game->autoTrans.forwardOnly = true;
+    game->state = STATE_PLAYING;
+
+    AiDriverConfig cfg;
+    ai_driver_config_default(&cfg);
+    AiDriverState ai;
+    memset(&ai, 0, sizeof(ai));
+
+    float timedLapS = -1.0f;
+    int gates = 0, outOfOrder = 0, offTrack = 0;
+    for (int t = 0; t < 14400 && game->track.lap < 2; t++) {
+        ai_driver_update(&cfg, &ai, &game->track, &game->vehicle, &game->derived, &game->spec,
+                         &game->input, FIXED_DT_S);
+        game_fixed_update(game, FIXED_DT_S);
+
+        const TrackCheckpointEvent ev = game->lastCheckpointEvent;
+        if (ev.crossed) {
+            gates++;
+            if (ev.outOfOrder) outOfOrder++;
+            if (ev.lapCompleted && game->track.lap == 2) timedLapS = ev.lapTimeS;
+        }
+        if (Track_SurfaceAt(&game->track, game->vehicle.positionM) != SURFACE_ASPHALT)
+            offTrack++;
+    }
+
+    if (gatesTakenOut != NULL) *gatesTakenOut = gates;
+    if (outOfOrderOut != NULL) *outOfOrderOut = outOfOrder;
+    if (offTrackTicksOut != NULL) *offTrackTicksOut = offTrack;
+    track_free(&game->track);
+    free(game);
+    return timedLapS;
+}
+
+/*
+ * The learned racing line is produced offline by a neural policy searched with cross-entropy
+ * neuroevolution (tools/validation/learn_racing_line.py) against a friction-limited lap-time
+ * model. This scenario is what makes that artefact trustworthy inside the simulator: it proves
+ * the line is a legal path — inside the racing surface, through every ordered gate — that it is
+ * genuinely distinct from the authored centreline, and that driving it is FASTER than driving
+ * the centreline with the same car, the same controller, and the same start.
+ */
+static void scenario_racing_line(void)
+{
+    const char *trackIds[3] = { "chicane", "sprint", "technical" };
+
+    for (int which = 0; which < 3; which++) {
+        Track track;
+        memset(&track, 0, sizeof(track));
+        load_validation_track(which, &track);
+
+        /* 1. The target line is a real optimisation result, not a copy of the centreline. */
+        float maxOffsetM = 0.0f;
+        float maxSurfaceExcursionM = 0.0f;
+        for (int i = 0; i < track.count; i++) {
+            const Vector2 c = track.nodes[i].centerM;
+            const Vector2 l = track.nodes[i].racingLineM;
+            const float d = sqrtf((l.x - c.x) * (l.x - c.x) + (l.y - c.y) * (l.y - c.y));
+            if (d > maxOffsetM) maxOffsetM = d;
+
+            /* The line must stay on asphalt: measured against the authored surface bands, not
+             * against the offset the optimiser believed it was asking for. */
+            const float excursion =
+                track_distance_to_centerline_m(&track, l, NULL) - track.nodes[i].halfWidthM;
+            if (excursion > maxSurfaceExcursionM) maxSurfaceExcursionM = excursion;
+        }
+        check(maxOffsetM > 0.5f,
+              "%s: the learned line departs from the centreline (peak %.2f m)", trackIds[which],
+              (double)maxOffsetM);
+        check(maxSurfaceExcursionM <= 0.0f,
+              "%s: every learned line point stays on the racing surface (worst margin %.2f m)",
+              trackIds[which], (double)maxSurfaceExcursionM);
+        check(Track_SurfaceAt(&track, track.nodes[0].racingLineM) == SURFACE_ASPHALT,
+              "%s: the learned line starts on asphalt", trackIds[which]);
+
+        /* 2. It still passes every ordered checkpoint: a faster path that skips a gate is not
+         *    a racing line, it is a shortcut. */
+        float worstGateMarginM = -1.0e9f;
+        for (int i = 0; i < track.checkpointCount; i++) {
+            const float d = racing_line_distance_to(&track, track.checkpoints[i].centerM);
+            const float margin = d - track.checkpoints[i].halfWidthM;
+            if (margin > worstGateMarginM) worstGateMarginM = margin;
+        }
+        check(worstGateMarginM < 0.0f,
+              "%s: the learned line passes inside all %d gates (worst margin %.2f m)",
+              trackIds[which], track.checkpointCount, (double)worstGateMarginM);
+
+        /* 3. Shorter: the optimiser trades a tighter apex for distance, and the path it settles
+         *    on has to actually be shorter than driving down the middle of the road. */
+        const float lineLengthM = racing_line_length_m(&track);
+        for (int i = 0; i < track.count; i++)
+            track.nodes[i].racingLineM = track.nodes[i].centerM;
+        const float centreLengthM = racing_line_length_m(&track);
+        check(lineLengthM < centreLengthM,
+              "%s: the learned line is shorter than the centreline (%.1f m vs %.1f m)",
+              trackIds[which], (double)lineLengthM, (double)centreLengthM);
+        track_free(&track);
+
+        /* 4. The claim that matters, and the only one the model cannot fake: the same car,
+         *    controller, and standing start lap FASTER on the learned line than on the
+         *    centreline. A shorter path that cost speed would fail here. */
+        int learnedGates = 0, learnedOutOfOrder = 0, learnedOffTrack = 0;
+        int centreGates = 0, centreOutOfOrder = 0, centreOffTrack = 0;
+        const float learnedLapS = drive_timed_lap_s(which, false, &learnedGates,
+                                                    &learnedOutOfOrder, &learnedOffTrack);
+        const float centreLapS =
+            drive_timed_lap_s(which, true, &centreGates, &centreOutOfOrder, &centreOffTrack);
+
+        printf("    racing-line      %-9s  length %.1f m (centre %.1f m)  timed lap %.3f s "
+               "(centre %.3f s, %+.2f%%)\n",
+               trackIds[which], (double)lineLengthM, (double)centreLengthM, (double)learnedLapS,
+               (double)centreLapS,
+               100.0 * ((double)learnedLapS - (double)centreLapS) / (double)centreLapS);
+
+        check(learnedLapS > 0.0f, "%s: the learned line completed a timed lap (%.3f s)",
+              trackIds[which], (double)learnedLapS);
+        check(centreLapS > 0.0f, "%s: the centreline control completed a timed lap (%.3f s)",
+              trackIds[which], (double)centreLapS);
+        check(learnedGates == 16, "%s: the learned line took 16 ordered gates (got %d)",
+              trackIds[which], learnedGates);
+        check(learnedOutOfOrder == 0, "%s: the learned line crossed no gate out of order (%d)",
+              trackIds[which], learnedOutOfOrder);
+        check(learnedOffTrack == 0, "%s: the learned line never left the surface (%d ticks)",
+              trackIds[which], learnedOffTrack);
+        check(learnedLapS < centreLapS,
+              "%s: the learned line is the faster path through all checkpoints (%.3f s vs "
+              "%.3f s)",
+              trackIds[which], (double)learnedLapS, (double)centreLapS);
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -993,7 +1371,8 @@ static void scenario_track_runoff(void)
 
     /* A node with no runoff band keeps its barrier on the track edge, which is what every
      * ribbon built before runoff existed relies on. */
-    TrackNode legacy = (TrackNode){ { 0.0f, 0.0f }, 4.0f, SURFACE_ASPHALT, 0.0f };
+    TrackNode legacy =
+        (TrackNode){ { 0.0f, 0.0f }, 4.0f, SURFACE_ASPHALT, 0.0f, { 0.0f, 0.0f } };
     check_near((double)track_node_barrier_half_width(&legacy), 4.0, 1e-6,
                "a node with no runoff keeps its barrier on the track edge");
 
@@ -1021,10 +1400,14 @@ static void scenario_lap_target_results(void)
     game->track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
     game->track.count = 4;
     game->track.offTrackSurfaceId = SURFACE_GRASS;
-    game->track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    game->track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    game->track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
-    game->track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    game->track.nodes[0] =
+        (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 0.0f, 0.0f } };
+    game->track.nodes[1] =
+        (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 10.0f, 0.0f } };
+    game->track.nodes[2] =
+        (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 10.0f, 10.0f } };
+    game->track.nodes[3] =
+        (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f, { 0.0f, 10.0f } };
     track_build_checkpoints_from_nodes(&game->track);
     game->track.nextCheckpoint = 0; /* gate 0 is the finish line: crossing it completes a lap */
     game->track.lap = RESULTS_TARGET_LAPS - 1;
@@ -1487,6 +1870,14 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_chicane_track },
     { "ai-lap", "the baseline driver laps the chicane through Input alone, in order, on line",
       scenario_ai_lap },
+    { "ai-no-privilege",
+      "AI driver has no side channels: 3600-tick checksum parity with input replay",
+      scenario_ai_no_privilege },
+    { "ai-roster-laps", "uniform AiDriverConfig completes 2 laps across all 6 roster cars",
+      scenario_ai_roster_laps },
+    { "racing-line",
+      "the learned target line is legal, checkpoint-valid, and faster than the centreline",
+      scenario_racing_line },
     { "particle-pool", "init, spawn, round-robin wrap, update, and lifecycle",
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions", scenario_state_machine },

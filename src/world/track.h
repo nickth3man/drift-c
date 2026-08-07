@@ -35,13 +35,16 @@
 #define TRACK_VERSION_CHARS 16
 
 typedef struct {
-    Vector2 centerM;     /* centerline point, world meters */
+    Vector2 centerM;     /* authored centreline point, world meters */
     float halfWidthM;    /* racing-surface half-width, meters */
     SurfaceId surfaceId; /* surface inside this segment */
     /* Barrier distance from the centreline, meters. <= halfWidthM means "no runoff band":
      * the barrier stands on the track edge. Deliberately LAST in the struct so the existing
      * positional initialisers `{ {x,y}, hw, surface }` keep meaning what they always did. */
     float runoffHalfWidthM;
+    /* Learned target path. Authored loaders populate it from centerM before applying an
+     * optimized racing line; legacy positional initialisers leave it at zero. */
+    Vector2 racingLineM;
 } TrackNode;
 
 typedef struct {
@@ -71,10 +74,11 @@ typedef struct {
     /* Parking lot mode: rectangular open area instead of laned road. */
     bool isParkingLot;
     float lotMinXM, lotMaxXM, lotMinYM, lotMaxYM;
-    int nextCheckpoint; /* index of the next gate the car must cross */
-    int lap;            /* completed laps */
-    float lapTimerS;    /* seconds elapsed since the last checkpoint/lap */
-    float lastLapTimeS; /* time of the most recently completed lap */
+    int nextCheckpoint;     /* index of the next gate the car must cross */
+    int lap;                /* completed laps */
+    int lapStartCheckpoint; /* gate whose crossing closes one lap for this run */
+    float lapTimerS;        /* seconds elapsed since the last checkpoint/lap */
+    float lastLapTimeS;     /* time of the most recently completed lap */
     /* Identity, for telemetry and run metadata. Fixed arrays, never pointers: see the header
      * comment. `version` changes whenever the geometry changes, so a run recorded against an
      * older shape is identifiable rather than silently comparable. */
@@ -104,6 +108,11 @@ void track_free(Track *track); /* free arrays, zero the struct */
  * left-right chicane set into the far straight. Closed loop, 8 required gates, gate 0 the
  * start/finish. This is the track Milestone 1 validates every car against. */
 void track_load_chicane(Track *track);
+/* A second authored layout for multi-track AI validation. It preserves the checkpoint contract
+ * while changing the stadium proportions and chicane displacement. */
+void track_load_sprint(Track *track);
+/* A tighter technical layout derived from the authored chicane with shorter radii and narrower runoff. */
+void track_load_technical(Track *track);
 
 /* Derive one gate per centreline node, forward-facing and spanning the node width — the
  * implicit scheme the checkpoint code used before gates became explicit data. Lets a caller
@@ -114,10 +123,15 @@ bool track_build_checkpoints_from_nodes(Track *track);
  * the next required gate set to the one after start/finish, because a standing start places
  * the car ON the start/finish line and it must not score that gate without driving a lap. */
 void track_reset_progress(Track *track);
+/* Reset progress for a standing start at an arbitrary checkpoint. */
+void track_reset_progress_at(Track *track, int startCheckpointIndex);
 
 /* Where a standing start puts the car: the start/finish gate's midpoint, facing along its
  * forward direction. Returns false (and writes nothing) when the track has no gates. */
 bool track_start_pose(const Track *track, Vector2 *positionM, float *headingRad);
+/* Start pose at an arbitrary checkpoint, facing that gate's forward direction. */
+bool track_start_pose_at(const Track *track, int checkpointIndex, Vector2 *positionM,
+                         float *headingRad);
 
 /* FNV-1a over the node and checkpoint arrays. Two tracks with the same hash have the same
  * shape, so a run's metadata can prove which geometry produced it even if `version` was not

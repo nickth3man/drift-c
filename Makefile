@@ -152,14 +152,16 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 # Paths must stay repository-relative and free of whitespace and apostrophes: one manifest is
 # consumed by both Make and POSIX shell.
 
-SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c
-DEV_SRCS    := src/dev/dev_params.c src/dev/dev_presets.c src/dev/dev_replay.c src/dev/dev_state.c \
-               src/dev/failure_bundle.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
+SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
+               src/game/car_roster.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
+               src/game/telemetry.c src/game/ai_driver.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
+               src/physics/surface.c src/physics/vehicle.c
+DEV_SRCS    := src/dev/dev_state.c src/dev/failure_bundle.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
 DEV_UI_SRCS := src/dev/dev_lab.c
-GAME_SRCS   := src/game/game.c src/game/ai_driver.c src/game/audio.c src/game/car_roster.c src/physics/auto_transmission.c src/game/particle.c src/physics/vehicle.c \
-               src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c src/physics/surface.c src/world/track.c \
+GAME_SRCS   := src/game/game.c src/game/audio.c src/physics/auto_transmission.c src/game/particle.c \
+               src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c \
                src/world/collision.c src/render/render.c src/render/render_world.c \
-               src/render/render_vehicle.c src/render/render_hud.c src/game/replay.c src/game/telemetry.c \
+               src/render/render_vehicle.c src/render/render_hud.c src/render/render_validation_overlay.c \
                $(DEV_SRCS)
 PLATFORM_SRCS := src/platform/main.c src/platform/timestep.c
 HOTRELOAD_SRC := src/platform/hotreload_windows.c
@@ -373,6 +375,18 @@ baselines: test-physics
 	cp -f $(TELEMETRY)/phase2_*.csv $(BASELINES)/ 2>/dev/null || true
 	@ls -la $(BASELINES)
 
+# ---------------------------------------------------------------- validation pipeline --
+
+CAR ?= rwd_grip
+
+validate-car: dev
+	./build/dev/drifty.exe --validate-lap --car $(CAR)
+
+validate: dev
+	$(PYTHON) tools/validation/run_suite.py --exe build/dev/drifty.exe --out artifacts/validation
+
+validate-compare:
+	$(PYTHON) tools/validation/compare_runs.py $(A) $(B)
 # ------------------------------------------------------------------- quality and gates --
 
 format:

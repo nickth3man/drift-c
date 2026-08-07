@@ -31,6 +31,7 @@
 #include "world/track.h"
 #include "physics/vehicle.h"
 #include "physics/auto_transmission.h"
+#include "game/telemetry.h"
 
 typedef enum {
     STATE_MENU = 0,
@@ -44,6 +45,8 @@ typedef enum {
     GAME_TRACK_KEEP = 0, /* leave whatever game_init() loaded */
     GAME_TRACK_PARKING_LOT,
     GAME_TRACK_CHICANE,
+    GAME_TRACK_SPRINT,
+    GAME_TRACK_TECHNICAL,
     GAME_TRACK_COUNT
 } GameTrackId;
 
@@ -79,6 +82,7 @@ struct Game {
      * every tick, and excluded from the state checksum because it is a report about the
      * simulation rather than part of it. */
     TrackCheckpointEvent lastCheckpointEvent;
+    TrackCheckpointEvent pendingTelemetryCheckpointEvent;
     ParticlePool particles;
     Camera2D camera;
 
@@ -130,16 +134,5 @@ GAME_API uint32_t game_state_checksum(const Game *game);
 
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
-
-/* Overwrite the vehicle spec and reset the simulation to match. Safe to call after
- * game_init() for headless scenarios that need to test multiple specs against the
- * same maneuver. Does not re-initialise track, audio, or visual subsystems —
- * callers that need those must handle them separately. */
-GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec);
-
-/* Place the car at the loaded track's start/finish line, facing the way the circuit goes, and
- * put lap progress back to the beginning of an out-lap. Returns false when no track with
- * gates is loaded, in which case nothing is modified. */
-GAME_API bool game_spawn_on_track(Game *game);
 
 #endif /* DRIFTY_GAME_H */

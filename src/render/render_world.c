@@ -135,9 +135,9 @@ void render_world_draw_track(const Track *track, float ppm)
     /* --- grass surround (drawn first, behind everything) --- */
     {
         float minXM = track->nodes[0].centerM.x;
-        float maxXM = track->nodes[0].centerM.x;
+        float maxXM = minXM;
         float minYM = track->nodes[0].centerM.y;
-        float maxYM = track->nodes[0].centerM.y;
+        float maxYM = minYM;
         for (int i = 1; i < n; i++) {
             const Vector2 c = track->nodes[i].centerM;
             if (c.x < minXM) minXM = c.x;

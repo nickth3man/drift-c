@@ -51,26 +51,31 @@
 #if defined(DRIFTY_HOT_RELOAD) && !defined(_WIN32)
 #error Hot reload is implemented for Windows only.
 #endif
-
+/* Exported from the reloadable module; a no-op everywhere else. */
+#if defined(_WIN32) && defined(DRIFTY_HOT_RELOAD) && defined(DRIFTY_GAME_MODULE)
+#define GAME_API __declspec(dllexport)
+#else
+#define GAME_API
+#endif
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
-/* Incomplete types: the entry-point signatures only need pointers. game.h completes them. */
+#include "physics/vehicle.h"
+#include "world/track.h"
+#include "game/telemetry.h"
+#include "game/run_report.h"
+#include "render/render.h"
+
 typedef struct Game Game;
 typedef struct GameRunConfig GameRunConfig;
-
+typedef struct ValidationOverlayData ValidationOverlayData;
 /* This project spells logging TRACELOG(LOG_LEVEL, ...), but raylib's TRACELOG macro lives
  * in its internal utils.h, which is not installed with the library. Provide the same
  * spelling on top of the public TraceLog(). Usable only where raylib.h is in scope, which
  * is every translation unit that logs. */
 #ifndef TRACELOG
 #define TRACELOG(level, ...) TraceLog((level), __VA_ARGS__)
-#endif
-
-/* Exported from the reloadable module; a no-op everywhere else. */
-#if defined(_WIN32) && defined(DRIFTY_HOT_RELOAD) && defined(DRIFTY_GAME_MODULE)
-#define GAME_API __declspec(dllexport)
-#else
-#define GAME_API
 #endif
 
 /* Path the platform layer watches and loads. Overridable at build time. */
@@ -89,7 +94,12 @@ typedef struct GameRunConfig GameRunConfig;
     ENTRY(game_shutdown, void, Game *)                                                    \
     /* select track and car, then place the car on the start line. The platform layer   \
      * cannot do this itself: track and vehicle code live in the reloadable module. */ \
-    ENTRY(game_configure_run, bool, Game *, const GameRunConfig *)
+    ENTRY(game_configure_run, bool, Game *, const GameRunConfig *)                        \
+    ENTRY(game_apply_spec, void, Game *, const VehicleSpec *)                             \
+    ENTRY(game_spawn_on_track, bool, Game *)                                              \
+    ENTRY(game_spawn_on_track_at, bool, Game *, int)                                      \
+    ENTRY(game_telemetry_row, TelemetryRow, const Game *, int)                            \
+    ENTRY(render_draw_validation_overlay, void, const ValidationOverlayData *)
 
 /* Function types, needed by every configuration. */
 #define ENTRY(name, ret, ...) typedef ret(name##_t)(__VA_ARGS__);

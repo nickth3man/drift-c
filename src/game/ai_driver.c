@@ -1,17 +1,22 @@
 /*
- * ai_driver.c — pure pursuit steering, curvature-limited speed target.
+ * ai_driver.c — pure pursuit steering along the learned racing line, curvature-limited speed.
  *
- * Two independent controllers share one geometric query of the centreline:
+ * Two independent controllers share one geometric query of the target racing line — the
+ * per-node path the track publishes as `racingLineM`, which for the authored circuits is the
+ * minimum-lap-time path found offline by tools/validation/learn_racing_line.py and not the
+ * authored centreline:
  *
- *   STEERING follows the classic pure-pursuit law. A point is picked on the centreline a
+ *   STEERING follows the classic pure-pursuit law. A point is picked on the racing line a
  *   speed-dependent distance ahead, and the steer angle is the one that would put the car on
  *   a circular arc through it. A derivative term on cross-track error damps the weave that
  *   pure pursuit alone develops when the lookahead is short relative to the wheelbase.
  *
  *   SPEED comes from the tightest curvature within braking range. Each upcoming point on the
- *   centreline implies a cornering speed from the tyre's own lateral grip; back-propagating
+ *   racing line implies a cornering speed from the tyre's own lateral grip; back-propagating
  *   each of those through a constant-deceleration braking distance gives the fastest speed
- *   that is still stoppable in time for it. The minimum over the horizon is the target.
+ *   that is still stoppable in time for it. The minimum over the horizon is the target. A
+ *   straighter line therefore yields a higher speed target, which is the whole point of
+ *   optimising the line rather than the controller.
  *
  * Both read grip from the spec and the surface table, which is data the car publishes about
  * itself. Nothing here consults a force, a slip angle, or any other quantity a driver could
@@ -29,22 +34,22 @@
 /* Curvature below this is a straight; the reciprocal would otherwise overflow the target. */
 #define AI_MIN_CURVATURE_1PM 1.0e-4f
 
-/* How far past the pure braking distance the speed scan looks. Braking distance alone would
- * make the driver notice a corner exactly when it is already too late to slow for it, because
- * the scan and the braking both start at the same point. */
-#define AI_SPEED_SCAN_MARGIN_M 25.0f
+/* Keep the scan close to the physical braking point: the speed limit already back-propagates
+ * required deceleration, so a large extra margin would make the driver brake unnecessarily
+ * early and sacrifice the exit line. */
+#define AI_SPEED_SCAN_MARGIN_M 8.0f
 
 void ai_driver_config_default(AiDriverConfig *cfg)
 {
     if (cfg == NULL) return;
-    cfg->lookaheadBaseM = 6.0f;
-    cfg->lookaheadSpeedS = 0.45f;
-    cfg->corneringGripFraction = 0.80f;
-    cfg->brakeGripFraction = 0.80f;
+    cfg->lookaheadBaseM = 6.5f;
+    cfg->lookaheadSpeedS = 0.50f;
+    cfg->corneringGripFraction = 0.75f;
+    cfg->brakeGripFraction = 0.75f;
     cfg->steerGainP = 1.0f;
-    cfg->steerGainD = 0.08f;
-    cfg->speedGainP = 0.35f;
-    cfg->speedDeadbandMps = 0.30f;
+    cfg->steerGainD = 0.10f;
+    cfg->speedGainP = 1.0f;
+    cfg->speedDeadbandMps = 0.15f;
     cfg->maxSpeedMps = 80.0f;
 }
 
@@ -83,7 +88,8 @@ static float closest_on_segment(Vector2 a, Vector2 b, Vector2 p, float *tOut, Ve
 }
 
 /*
- * Menger curvature at node i, from its immediate neighbours: kappa = 2|AB x AC| / (|AB||BC||CA|).
+ * Menger curvature of the RACING LINE at node i, from its immediate neighbours:
+ * kappa = 2|AB x AC| / (|AB||BC||CA|).
  *
  * Exact for points sampled off a circle at any spacing, which is what the constant-radius
  * curves are, and it degrades gracefully to zero on a straight rather than dividing by a
@@ -92,9 +98,9 @@ static float closest_on_segment(Vector2 a, Vector2 b, Vector2 p, float *tOut, Ve
 static float node_curvature(const TrackNode *nodes, int count, int i)
 {
     if (count < 3) return 0.0f;
-    const Vector2 a = nodes[(i - 1 + count) % count].centerM;
-    const Vector2 b = nodes[i].centerM;
-    const Vector2 c = nodes[(i + 1) % count].centerM;
+    const Vector2 a = nodes[(i - 1 + count) % count].racingLineM;
+    const Vector2 b = nodes[i].racingLineM;
+    const Vector2 c = nodes[(i + 1) % count].racingLineM;
 
     const Vector2 ab = vec_sub(b, a);
     const Vector2 bc = vec_sub(c, b);
@@ -108,7 +114,7 @@ static float node_curvature(const TrackNode *nodes, int count, int i)
 }
 
 /*
- * Walk `distanceM` forward along the centreline from (segment, t) and return where that lands.
+ * Walk `distanceM` forward along the racing line from (segment, t) and return where that lands.
  *
  * The walk is capped at one lap so a lookahead longer than the circuit cannot spin forever.
  */
@@ -116,16 +122,16 @@ static Vector2 point_ahead(const TrackNode *nodes, int count, int segment, float
                            float distanceM)
 {
     Vector2 from = {
-        nodes[segment].centerM.x +
-            (nodes[(segment + 1) % count].centerM.x - nodes[segment].centerM.x) * t,
-        nodes[segment].centerM.y +
-            (nodes[(segment + 1) % count].centerM.y - nodes[segment].centerM.y) * t
+        nodes[segment].racingLineM.x +
+            (nodes[(segment + 1) % count].racingLineM.x - nodes[segment].racingLineM.x) * t,
+        nodes[segment].racingLineM.y +
+            (nodes[(segment + 1) % count].racingLineM.y - nodes[segment].racingLineM.y) * t
     };
     float remainingM = distanceM;
 
     for (int step = 0; step < count; step++) {
         const int next = (segment + 1 + step) % count;
-        const Vector2 target = nodes[next].centerM;
+        const Vector2 target = nodes[next].racingLineM;
         const Vector2 leg = vec_sub(target, from);
         const float legM = vec_len(leg);
         if (legM >= remainingM) {
@@ -155,9 +161,10 @@ static void available_grip(const VehicleSpec *spec, const Track *track, Vector2 
         (track != NULL) ? Track_SurfaceAt(track, positionM) : (SurfaceId)SURFACE_ASPHALT;
     const SurfaceSpec *surface = Surface_Get(id);
 
-    const float tyreMuLat = minf(spec->tireMuLatFront, spec->tireMuLatRear);
-    *muLatOut = tyreMuLat * (surface->muLateral / SURFACE_REFERENCE_MU_LAT);
-    *muLongOut = spec->tireMuLongScale * surface->muLongitudinal;
+    const float tyreMu = minf(spec->tireMuLatFront, spec->tireMuLatRear);
+    *muLatOut = tyreMu * (surface->muLateral / SURFACE_REFERENCE_MU_LAT);
+    *muLongOut =
+        tyreMu * spec->tireMuLongScale * (surface->muLongitudinal / SURFACE_REFERENCE_MU_LONG);
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -175,19 +182,19 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
     const Vector2 posM = vehicle->positionM;
     const float speedMps = derived->speedMps;
 
-    /* --- Where the car is on the centreline ---
+    /* --- Where the car is on the racing line ---
      * A full scan rather than a search around last tick's answer: 170 segments is nothing at
      * 120 Hz, and it cannot lose the line after a spin or a barrier shove, which a local
      * search can. */
     int bestSegment = 0;
     float bestT = 0.0f;
-    Vector2 bestPoint = nodes[0].centerM;
+    Vector2 bestPoint = nodes[0].racingLineM;
     float bestDistM = INFINITY;
     for (int i = 0; i < count; i++) {
         float t = 0.0f;
         Vector2 point = { 0.0f, 0.0f };
-        const float d = closest_on_segment(nodes[i].centerM, nodes[(i + 1) % count].centerM,
-                                           posM, &t, &point);
+        const float d = closest_on_segment(
+            nodes[i].racingLineM, nodes[(i + 1) % count].racingLineM, posM, &t, &point);
         if (d < bestDistM) {
             bestDistM = d;
             bestSegment = i;
@@ -196,10 +203,10 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
         }
     }
 
-    /* Signed cross-track error, positive when the car is LEFT of the centreline. Body Y is
+    /* Signed cross-track error, positive when the car is LEFT of the racing line. Body Y is
      * left, so the left normal of a forward direction (fx,fy) is (-fy,fx). */
     const Vector2 segDir =
-        vec_sub(nodes[(bestSegment + 1) % count].centerM, nodes[bestSegment].centerM);
+        vec_sub(nodes[(bestSegment + 1) % count].racingLineM, nodes[bestSegment].racingLineM);
     const float segLen = vec_len(segDir);
     float crossTrackM = 0.0f;
     if (segLen > 1.0e-6f) {
@@ -248,7 +255,7 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
     Vector2 walk = bestPoint;
     for (int step = 0; step < count && scannedM <= horizonM; step++) {
         const int node = (bestSegment + 1 + step) % count;
-        const Vector2 here = nodes[node].centerM;
+        const Vector2 here = nodes[node].racingLineM;
         scannedM += vec_len(vec_sub(here, walk));
         walk = here;
 
@@ -265,15 +272,20 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
     targetSpeedMps = clampf(targetSpeedMps, 0.0f, cfg->maxSpeedMps);
 
     const float speedErrorMps = targetSpeedMps - speedMps;
-    if (speedErrorMps > cfg->speedDeadbandMps) {
-        out->throttle = clampf(cfg->speedGainP * speedErrorMps, 0.0f, 1.0f);
+    if (speedErrorMps >= -cfg->speedDeadbandMps) {
+        /* Full throttle is the default on the authored racing line. The curvature scan has
+         * already reduced targetSpeedMps before a corner. If the previous physics tick reports
+         * the friction ellipse filling up, spend the remaining longitudinal grip on the line
+         * instead of turning a high-power car into an unrecoverable spin. */
+        const float gripHeadroom =
+            clampf((1.0f - derived->maxFrictionUsage) / 0.20f, 0.0f, 1.0f);
+        out->throttle = (derived->maxFrictionUsage > 0.80f) ? gripHeadroom : 1.0f;
         out->brake = 0.0f;
-    } else if (speedErrorMps < -cfg->speedDeadbandMps) {
+    } else {
+        /* Once late braking is required, use the shortest available deceleration rather than
+         * coasting into the corner. The target was back-propagated from its tightest point. */
         out->throttle = 0.0f;
         out->brake = clampf(-cfg->speedGainP * speedErrorMps, 0.0f, 1.0f);
-    } else {
-        out->throttle = 0.0f;
-        out->brake = 0.0f;
     }
 
     /* This driver has no handbrake. Stated as an assignment rather than an omission so that a

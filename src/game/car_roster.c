@@ -28,6 +28,9 @@
 #define KEY_CG_FRONT "body.cg_to_front"
 #define KEY_CG_REAR "body.cg_to_rear"
 #define KEY_BRAKE_BIAS "brake.bias_front"
+#define KEY_BRAKE_TORQUE "brake.max_torque"
+#define KEY_TIRE_MU_FRONT "tire.lat_front.mu"
+#define KEY_TIRE_MU_REAR "tire.lat_rear.mu"
 
 /* One roster entry's configuration: which preset to seed from, plus the overrides that make
  * it the car the roster wants it to be. */
