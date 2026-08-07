@@ -60,14 +60,18 @@ and so is this tool, so these reproduce exactly:
 
 Two properties of the metrics matter more than any single number here.
 
-**Area span and centroid drift are independent of `--steps`.** They describe the sprite, so the
-same values come back at 32, 64, 128, or 256 steps.
+**Area span and centroid drift converge quickly across sample counts for these sprites.** For the
+recorded corpus entries, the extrema happen to match across 32, 64, 128, and 256 steps. However,
+because `measure_sprite_rotation.py` evaluates metrics over the discrete headings visited by
+`range(steps)`, finer sampling can in general uncover new extrema. Always use a consistent
+`--steps` parameter for all metric gates.
 
-**Adjacent-heading XOR is not.** It measures the change between neighbouring headings, so it
-falls roughly by half each time the step count doubles — for `archetype_01_kei_car`: 21.84% at
-32 steps, 12.91% at 64, 7.28% at 128, 3.97% at 256. An XOR figure is therefore meaningless
-without the step count beside it, and `--max-adjacent-xor-ratio` may only be compared against
-runs that fix `--steps` to the same value. Quote the step count whenever you quote the metric.
+**Adjacent-heading XOR scales strongly with `--steps`.** It measures the change between
+neighbouring headings, so it falls roughly by half each time the step count doubles — for
+`archetype_01_kei_car`: 21.84% at 32 steps, 12.91% at 64, 7.28% at 128, 3.97% at 256. An XOR figure
+is therefore meaningless without the step count beside it, and `--max-adjacent-xor-ratio` may
+only be compared against runs that fix `--steps` to the same value. Always state the step count
+whenever quoting any stability metric.
 
 ## How to use the result
 

@@ -251,10 +251,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--max-differing-ratio must be in [0, 1]")
     if not 0.0 <= args.max_alpha_xor_ratio <= 1.0:
         parser.error("--max-alpha-xor-ratio must be in [0, 1]")
-    if args.max_rgb_rmse < 0.0:
-        parser.error("--max-rgb-rmse must be non-negative")
-    if args.max_rgba_rmse < 0.0:
-        parser.error("--max-rgba-rmse must be non-negative")
+    if not (math.isfinite(args.max_rgb_rmse) and args.max_rgb_rmse >= 0.0):
+        parser.error("--max-rgb-rmse must be non-negative and finite")
+    if not (math.isfinite(args.max_rgba_rmse) and args.max_rgba_rmse >= 0.0):
+        parser.error("--max-rgba-rmse must be non-negative and finite")
     if not 0 <= args.max_channel_delta <= 255:
         parser.error("--max-channel-delta must be in [0, 255]")
     return args
