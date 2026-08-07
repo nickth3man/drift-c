@@ -1,0 +1,21 @@
+# Line endings are a repository property, not a per-developer git config. Without this file
+# the tree is correct only for developers who happen to have core.autocrlf set, and the first
+# contributor without it commits a whole-file CRLF diff.
+#
+# Everything currently in the index is LF, so this pins the status quo rather than changing it.
+
+* text=auto eol=lf
+
+# Read by cmd.exe, which wants CRLF.
+*.bat text eol=crlf
+
+# Committed deterministic baselines. Written by the C telemetry writer with LF; keeping the
+# worktree copy LF too means the file on disk is byte-identical to what the run produced.
+*.csv text eol=lf
+
+# Binary: never touch, never diff as text.
+*.png binary
+*.dll binary
+*.exe binary
+*.a   binary
+*.lib binary

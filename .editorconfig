@@ -1,0 +1,33 @@
+# Editor defaults, so a file is already correctly shaped before clang-format or ruff runs.
+# The C settings mirror .clang-format; changing one without the other will make them fight.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{c,h}]
+max_line_length = 96
+
+[*.py]
+max_line_length = 96
+
+[*.{yml,yaml,json,js}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+# Batch files are read by cmd.exe, which wants CRLF. .gitattributes pins this too.
+[*.bat]
+end_of_line = crlf
+
+# Vendored, unmodified. Never reformat.
+[third_party/**]
+trim_trailing_whitespace = false
+insert_final_newline = false
