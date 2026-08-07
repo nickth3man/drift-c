@@ -2586,10 +2586,10 @@ static void scenario_drivetrain_layout(void)
     const float noReaction[WHEEL_COUNT] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
     /* --- Torque routing: which axle receives drive torque? --- */
-    for (int layout = 0; layout <= 2; layout++) {
+    for (int layout = DRIVE_LAYOUT_RWD; layout <= DRIVE_LAYOUT_AWD; layout++) {
         VehicleSpec spec = baseSpec;
         spec.drivetrainLayout = (float)layout;
-        if (layout == 2) spec.frontTorqueSplit = 0.5f;
+        if (layout == DRIVE_LAYOUT_AWD) spec.frontTorqueSplit = 0.5f;
 
         DrivetrainTorques t =
             drivetrain_calculate_torques(&spec, 1, restOmega, noReaction, 1.0f, 0.0f, 0.0f);
@@ -2598,10 +2598,10 @@ static void scenario_drivetrain_layout(void)
         const float rearDrive =
             t.driveTorqueNm[WHEEL_REAR_LEFT] + t.driveTorqueNm[WHEEL_REAR_RIGHT];
 
-        if (layout == 0) { /* RWD */
+        if (layout == DRIVE_LAYOUT_RWD) {
             check(frontDrive == 0.0f, "RWD: front wheels receive zero drive torque");
             check(rearDrive > 0.0f, "RWD: rear wheels receive drive torque");
-        } else if (layout == 1) { /* FWD */
+        } else if (layout == DRIVE_LAYOUT_FWD) {
             check(frontDrive > 0.0f, "FWD: front wheels receive drive torque");
             check(rearDrive == 0.0f, "FWD: rear wheels receive zero drive torque");
         } else { /* AWD */
@@ -2617,10 +2617,10 @@ static void scenario_drivetrain_layout(void)
      * invert at extreme power levels (RWD wheelspin drops force below the tire peak). */
     float rearSlipRatio[3] = { 0.0f, 0.0f, 0.0f };
     float frontSlipRatio[3] = { 0.0f, 0.0f, 0.0f };
-    for (int layout = 0; layout <= 2; layout++) {
+    for (int layout = DRIVE_LAYOUT_RWD; layout <= DRIVE_LAYOUT_AWD; layout++) {
         VehicleSpec spec = baseSpec;
         spec.drivetrainLayout = (float)layout;
-        if (layout == 2) spec.frontTorqueSplit = 0.5f;
+        if (layout == DRIVE_LAYOUT_AWD) spec.frontTorqueSplit = 0.5f;
         vehicle_spec_refresh_derived(&spec);
         vehicle_state_reset(&spec, &state, &derived, &renderState);
         state.velocityLongitudinalMps = 12.0f;
@@ -2643,29 +2643,74 @@ static void scenario_drivetrain_layout(void)
     }
 
     /* RWD: rear slip ratio >> front (all drive goes rear). */
-    check(rearSlipRatio[0] > frontSlipRatio[0] + 0.01f,
+    check(rearSlipRatio[DRIVE_LAYOUT_RWD] > frontSlipRatio[DRIVE_LAYOUT_RWD] + 0.01f,
           "RWD: rear slip ratio (%.4f) exceeds front (%.4f) under power",
-          (double)rearSlipRatio[0], (double)frontSlipRatio[0]);
+          (double)rearSlipRatio[DRIVE_LAYOUT_RWD], (double)frontSlipRatio[DRIVE_LAYOUT_RWD]);
     /* FWD: front slip ratio >> rear (all drive goes front). */
-    check(frontSlipRatio[1] > rearSlipRatio[1] + 0.01f,
+    check(frontSlipRatio[DRIVE_LAYOUT_FWD] > rearSlipRatio[DRIVE_LAYOUT_FWD] + 0.01f,
           "FWD: front slip ratio (%.4f) exceeds rear (%.4f) under power",
-          (double)frontSlipRatio[1], (double)rearSlipRatio[1]);
+          (double)frontSlipRatio[DRIVE_LAYOUT_FWD], (double)rearSlipRatio[DRIVE_LAYOUT_FWD]);
     /* AWD: both axles show nonzero slip (both receive drive torque). */
-    check(rearSlipRatio[2] > 0.01f && frontSlipRatio[2] > 0.01f,
+    check(rearSlipRatio[DRIVE_LAYOUT_AWD] > 0.01f && frontSlipRatio[DRIVE_LAYOUT_AWD] > 0.01f,
           "AWD: both axles show drive-induced slip (rear %.4f, front %.4f)",
-          (double)rearSlipRatio[2], (double)frontSlipRatio[2]);
+          (double)rearSlipRatio[DRIVE_LAYOUT_AWD], (double)frontSlipRatio[DRIVE_LAYOUT_AWD]);
     /* Rear-minus-front slip-ratio differential: RWD is largest, FWD is smallest (negative). */
     const float diff[3] = {
-        rearSlipRatio[0] - frontSlipRatio[0],
-        rearSlipRatio[1] - frontSlipRatio[1],
-        rearSlipRatio[2] - frontSlipRatio[2],
+        rearSlipRatio[DRIVE_LAYOUT_RWD] - frontSlipRatio[DRIVE_LAYOUT_RWD],
+        rearSlipRatio[DRIVE_LAYOUT_FWD] - frontSlipRatio[DRIVE_LAYOUT_FWD],
+        rearSlipRatio[DRIVE_LAYOUT_AWD] - frontSlipRatio[DRIVE_LAYOUT_AWD],
     };
-    check(diff[0] >= diff[2],
+    check(diff[DRIVE_LAYOUT_RWD] >= diff[DRIVE_LAYOUT_AWD],
           "RWD has the largest rear-minus-front slip-ratio differential (RWD %.4f >= AWD %.4f)",
-          (double)diff[0], (double)diff[2]);
-    check(diff[2] >= diff[1],
+          (double)diff[DRIVE_LAYOUT_RWD], (double)diff[DRIVE_LAYOUT_AWD]);
+    check(diff[DRIVE_LAYOUT_AWD] >= diff[DRIVE_LAYOUT_FWD],
           "AWD slip-ratio differential is between RWD and FWD (AWD %.4f >= FWD %.4f)",
-          (double)diff[2], (double)diff[1]);
+          (double)diff[DRIVE_LAYOUT_AWD], (double)diff[DRIVE_LAYOUT_FWD]);
+
+    /* --- LOCKED FWD through a turn: the undriven rear axle stays independent. Before the
+     * driven-axle gating, the state invariant demanded rear lockstep for every LOCKED diff,
+     * so a front-drive locked car failed validation mid-corner and physics_fixed_update
+     * rolled every turning step back — the car froze. Yaw rate growing past zero is the
+     * observable proof that the steps are accepted now. */
+    {
+        VehicleSpec spec = baseSpec;
+        spec.drivetrainLayout = (float)DRIVE_LAYOUT_FWD;
+        spec.differentialMode = (float)DIFF_LOCKED;
+        vehicle_spec_refresh_derived(&spec);
+        vehicle_state_reset(&spec, &state, &derived, &renderState);
+        state.velocityLongitudinalMps = 12.0f;
+
+        Input input;
+        input_zero(&input);
+        input.steer = 0.20f;
+        input.throttle = 0.15f;
+        for (int i = 0; i < 180; i++)
+            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+
+        check(fabsf(state.yawRateRadS) > 0.01f,
+              "FWD LOCKED: turning steps are accepted, no validation rollback (yaw %.4f rad/s)",
+              (double)state.yawRateRadS);
+        check(fabsf(state.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS -
+                    state.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS) <= 1e-5f,
+              "FWD LOCKED: driven front wheels share one omega");
+        /* The wheel integrator reaches equilibrium against body vx, so the invariant is what
+         * separates a locked driven axle from an independent undriven one. Probe it directly:
+         * the undriven rear axle may diverge (cornering, asymmetric surfaces), the driven
+         * front axle must not. Before the driven-axle gating the first probe was rejected and
+         * physics_fixed_update rolled the step back. */
+        {
+            VehicleState probe = state;
+            probe.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS =
+                probe.wheels[WHEEL_REAR_LEFT].angularVelocityRadS + 1.0f;
+            check(physics_state_is_valid(&spec, &probe, &derived),
+                  "FWD LOCKED: invariant accepts divergent undriven rear wheels");
+            probe = state;
+            probe.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS =
+                probe.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS + 1.0f;
+            check(!physics_state_is_valid(&spec, &probe, &derived),
+                  "FWD LOCKED: invariant still rejects divergent driven front wheels");
+        }
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -2718,12 +2763,14 @@ static void scenario_roster(void)
     check(strcmp(car_roster_layout_name(4), "AWD") == 0, "entry 4 is AWD");
 
     /* Profile round-trip: save each spec to a temp file, load it onto a fresh stock spec,
-     * and verify the layout survives. */
+     * and verify every primary parameter survives. The directory is ensured here so the
+     * scenario stands alone — it must not depend on scenario_telemetry having run first. */
+    check(telemetry_ensure_dir(TELEMETRY_DIR), "the telemetry directory exists or was created");
     for (int i = 0; i < count && i < 16; i++) {
         VehicleSpec original;
         if (!car_roster_spec(i, &original)) continue;
 
-        const char *tmpPath = "artifacts/telemetry/_roster_roundtrip.txt";
+        const char *tmpPath = TELEMETRY_DIR "/_roster_roundtrip.txt";
         check(dev_params_save(&original, tmpPath), "roster entry %d profile saves successfully",
               i);
 
@@ -2736,9 +2783,19 @@ static void scenario_roster(void)
         if (ok) {
             check(vehicle_spec_is_valid(&roundtrip),
                   "roster entry %d round-trip produces a valid spec", i);
-            check(roundtrip.drivetrainLayout == original.drivetrainLayout,
-                  "roster entry %d layout survives profile round-trip (%g vs %g)", i,
-                  (double)roundtrip.drivetrainLayout, (double)original.drivetrainLayout);
+            /* The whole primary parameter set must survive, not just the layout: a save/load
+             * regression in gearing, engine torque, or brake bias is exactly what this
+             * scenario exists to catch. The profile format prints %.6f, so values agree to
+             * within the format's quantum rather than bit-exactly. */
+            for (int p = 0; p < dev_params_count(); p++) {
+                const DevParameter *param = dev_param_at(p);
+                if (param->derived) continue;
+                const float expected = dev_param_get(&original, param);
+                const float got = dev_param_get(&roundtrip, param);
+                check(fabsf(got - expected) <= 1e-6f * fmaxf(1.0f, fabsf(expected)),
+                      "roster entry %d param %s survives profile round-trip (%g vs %g)", i,
+                      param->name, (double)got, (double)expected);
+            }
         }
     }
 }

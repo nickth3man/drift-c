@@ -32,9 +32,9 @@
 /* One roster entry's configuration: which preset to seed from, plus the overrides that make
  * it the car the roster wants it to be. */
 typedef struct {
-    int presetIndex;        /* dev_presets.c index to seed from */
-    int layout;             /* 0=RWD, 1=FWD, 2=AWD */
-    float frontTorqueSplit; /* AWD only; ignored for RWD/FWD */
+    int presetIndex;         /* dev_presets.c index to seed from */
+    DrivetrainLayout layout; /* which axle(s) the driveline drives */
+    float frontTorqueSplit;  /* AWD only; ignored for RWD/FWD */
     const char *id;
     const char *displayName;
     const char *describe;
@@ -51,7 +51,7 @@ static const RosterEntry kRoster[] = {
     /* 0: rwd_grip — the reference car. Track Predator as-is; RWD is its native layout. */
     {
         4,
-        0,
+        DRIVE_LAYOUT_RWD,
         0.0f,
         "rwd_grip",
         "RWD Grip",
@@ -61,7 +61,7 @@ static const RosterEntry kRoster[] = {
     /* 1: rwd_power — Pro D1GP, high power, lower rear mu. RWD is native. */
     {
         2,
-        0,
+        DRIVE_LAYOUT_RWD,
         0.0f,
         "rwd_power",
         "RWD Power",
@@ -72,7 +72,7 @@ static const RosterEntry kRoster[] = {
      * the driven axle and brakes forward. */
     {
         8,
-        1,
+        DRIVE_LAYOUT_FWD,
         0.0f,
         "fwd_light",
         "FWD Light",
@@ -88,7 +88,7 @@ static const RosterEntry kRoster[] = {
      * front-drive layout and a forward weight bias. Torque steer and lift-off rotation. */
     {
         4,
-        1,
+        DRIVE_LAYOUT_FWD,
         0.0f,
         "fwd_hot",
         "FWD Hot",
@@ -103,7 +103,7 @@ static const RosterEntry kRoster[] = {
     /* 4: awd_rally — Rally Devil with AWD. 50/50 split, loose-surface bias. */
     {
         5,
-        2,
+        DRIVE_LAYOUT_AWD,
         0.50f,
         "awd_rally",
         "AWD Rally",
@@ -113,8 +113,8 @@ static const RosterEntry kRoster[] = {
     /* 5: awd_gt — Track Predator converted to AWD. Front-biased split, high grip. */
     {
         4,
-        2,
-        0.40f,
+        DRIVE_LAYOUT_AWD,
+        0.60f,
         "awd_gt",
         "AWD GT",
         "front-biased split, high grip",
@@ -135,7 +135,9 @@ bool car_roster_spec(int index, VehicleSpec *out)
 
     const RosterEntry *entry = &kRoster[index];
 
-    /* Start from the preset's researched baseline numbers. */
+    /* Start from the preset's researched baseline numbers. A bad preset index would leave
+     * *out unwritten and the overrides below would land on garbage, so refuse loudly. */
+    if (dev_preset_at(entry->presetIndex) == NULL) return false;
     dev_preset_apply(out, entry->presetIndex);
 
     /* Apply layout-specific overrides first, then the drivetrain configuration. The
@@ -153,7 +155,7 @@ bool car_roster_spec(int index, VehicleSpec *out)
     items[count].value = (float)entry->layout;
     count++;
 
-    if (entry->layout == 2) {
+    if (entry->layout == DRIVE_LAYOUT_AWD) {
         items[count].key = KEY_SPLIT;
         items[count].value = entry->frontTorqueSplit;
         count++;
@@ -189,8 +191,9 @@ const char *car_roster_layout_name(int index)
 {
     if (index < 0 || index >= ROSTER_COUNT) return "?";
     switch (kRoster[index].layout) {
-        case 1: return "FWD";
-        case 2: return "AWD";
+        case DRIVE_LAYOUT_FWD: return "FWD";
+        case DRIVE_LAYOUT_AWD: return "AWD";
+        case DRIVE_LAYOUT_RWD:
         default: return "RWD";
     }
 }

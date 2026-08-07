@@ -36,6 +36,14 @@ typedef enum {
     DIFF_LSD         /* torque-biasing clutch: biasRatio + preload            */
 } DifferentialMode;
 
+/* Which axle(s) the driveline connects to. VehicleSpec stores this as the float tunable
+ * drivetrainLayout so profiles can set it; cast with (DrivetrainLayout)(int) to compare. */
+typedef enum {
+    DRIVE_LAYOUT_RWD = 0, /* rear axle driven                                  */
+    DRIVE_LAYOUT_FWD,     /* front axle driven                                 */
+    DRIVE_LAYOUT_AWD      /* both axles; frontTorqueSplit sets the front share */
+} DrivetrainLayout;
+
 typedef enum { VEH_ROOF_FIXED = 0, VEH_ROOF_TARGA, VEH_ROOF_CONVERTIBLE } VehicleRoofType;
 
 typedef struct {
@@ -120,7 +128,7 @@ typedef struct {
     float aeroCentreOfPressureXM;
 
     /* ---- layout / engine packaging (primary) ---- */
-    float drivetrainLayout; /* 0=RWD, 1=FWD, 2=AWD */
+    float drivetrainLayout; /* DrivetrainLayout: RWD/FWD/AWD */
     float frontTorqueSplit; /* 0..1 front share when AWD */
     float engineCylinders;
     float engineDisplacementL;

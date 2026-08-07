@@ -61,10 +61,11 @@ float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
 float drivetrain_front_torque_share(const VehicleSpec *spec)
 {
     if (spec == NULL) return 0.0f;
-    switch ((int)spec->drivetrainLayout) {
-        case 1: return 1.0f;                                       /* FWD */
-        case 2: return clampf(spec->frontTorqueSplit, 0.0f, 1.0f); /* AWD */
-        default: return 0.0f;                                      /* RWD */
+    switch ((DrivetrainLayout)(int)spec->drivetrainLayout) {
+        case DRIVE_LAYOUT_FWD: return 1.0f;
+        case DRIVE_LAYOUT_AWD: return clampf(spec->frontTorqueSplit, 0.0f, 1.0f);
+        case DRIVE_LAYOUT_RWD:
+        default: return 0.0f;
     }
 }
 

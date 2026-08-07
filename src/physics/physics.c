@@ -476,11 +476,42 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     if (state->engineRpm < spec->engineIdleRpm - 1e-3f ||
         state->engineRpm > spec->engineRedlineRpm + 1e-3f)
         return false;
-    if ((DifferentialMode)(int)spec->differentialMode == DIFF_LOCKED &&
-        fabsf(state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS -
-              state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS) > 1e-5f)
-        return false;
+    if ((DifferentialMode)(int)spec->differentialMode == DIFF_LOCKED) {
+        /* Locked means locked on each DRIVEN axle. An undriven axle's wheels legitimately
+         * rotate at different speeds (turns, asymmetric surfaces), so requiring lockstep
+         * there would reject valid states and roll the step back. */
+        const float frontShare = drivetrain_front_torque_share(spec);
+        if (frontShare > 0.0f &&
+            fabsf(state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS -
+                  state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS) > 1e-5f)
+            return false;
+        if (frontShare < 1.0f &&
+            fabsf(state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS -
+                  state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS) > 1e-5f)
+            return false;
+    }
     return true;
+}
+
+/* Locked axle, post-integration: one wheel pair, same treatment front and rear. The right
+ * wheel follows the left, including the lock flag — one omega per driven axle is the whole
+ * point of a locked differential. */
+static void locked_axle_equalize(VehicleState *state, WheelId left, WheelId right)
+{
+    state->wheels[right].angularVelocityRadS = state->wheels[left].angularVelocityRadS;
+    state->wheels[right].locked = state->wheels[left].locked;
+}
+
+/* Locked axle redline clamp: pin both wheels of the pair to the signed magnitude the
+ * engine's redline permits through the current gear. */
+static void locked_axle_clamp_redline(VehicleState *state, WheelId left, WheelId right,
+                                      float maxOmegaRadS)
+{
+    const float omega = state->wheels[left].angularVelocityRadS;
+    const float omegaSign = (omega > 0.0f) ? 1.0f : (omega < 0.0f) ? -1.0f : 0.0f;
+    const float limitedOmega = omegaSign * fminf(fabsf(omega), maxOmegaRadS);
+    state->wheels[left].angularVelocityRadS = limitedOmega;
+    state->wheels[right].angularVelocityRadS = limitedOmega;
 }
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
@@ -513,10 +544,19 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         }
     }
 
-    /* Phase 4 differential: gated on LOCKED. For OPEN/LSD, rear omegas may differ
-     * legitimately, so no equalization is performed. */
+    /* Locked-axle enforcement, pre-integration: the drivetrain below must see one omega per
+     * driven axle, so each DRIVEN axle is equalized. Undriven wheels stay independent, and
+     * OPEN/LSD perform no equalization at all. */
     const DifferentialMode diffMode = (DifferentialMode)(int)spec->differentialMode;
-    if (diffMode == DIFF_LOCKED) {
+    const float frontShare = drivetrain_front_torque_share(spec);
+    if (diffMode == DIFF_LOCKED && frontShare > 0.0f) {
+        const float frontAngularVelocityRadS =
+            0.5f * (state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS +
+                    state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS);
+        state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS = frontAngularVelocityRadS;
+        state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS = frontAngularVelocityRadS;
+    }
+    if (diffMode == DIFF_LOCKED && frontShare < 1.0f) {
         const float rearAngularVelocityRadS =
             0.5f * (state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
                     state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS);
@@ -541,8 +581,7 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
             state->wheels[i].forceLongitudinalN * vehicle_wheel_radius_m(spec, i);
     }
 
-    const float drivenOmegaRadS =
-        drivetrain_driven_mean_omega(wheelOmegaRadS, drivetrain_front_torque_share(spec));
+    const float drivenOmegaRadS = drivetrain_driven_mean_omega(wheelOmegaRadS, frontShare);
     state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
 
     DrivetrainTorques torques = drivetrain_calculate_torques(
@@ -961,40 +1000,19 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
     }
     /* Locked-axle enforcement: only for LOCKED mode, applied to each DRIVEN axle.
      * OPEN and LSD let wheels rotate independently, so no equalization is performed. */
-    const float frontShare = drivetrain_front_torque_share(spec);
-    if (diffMode == DIFF_LOCKED && frontShare > 0.0f) {
-        state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS =
-            state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS;
-        state->wheels[WHEEL_FRONT_RIGHT].locked = state->wheels[WHEEL_FRONT_LEFT].locked;
-    }
-    if (diffMode == DIFF_LOCKED && frontShare < 1.0f) {
-        state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS =
-            state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
-        state->wheels[WHEEL_REAR_RIGHT].locked = state->wheels[WHEEL_REAR_LEFT].locked;
-    }
+    if (diffMode == DIFF_LOCKED && frontShare > 0.0f)
+        locked_axle_equalize(state, WHEEL_FRONT_LEFT, WHEEL_FRONT_RIGHT);
+    if (diffMode == DIFF_LOCKED && frontShare < 1.0f)
+        locked_axle_equalize(state, WHEEL_REAR_LEFT, WHEEL_REAR_RIGHT);
     if (diffMode == DIFF_LOCKED && torques.totalGearRatio != 0.0f) {
         const float redlineWheelOmegaRadS =
             spec->engineRedlineRpm * DRIFTY_TWO_PI / (60.0f * fabsf(torques.totalGearRatio));
-        if (frontShare > 0.0f) {
-            const float frontOmega = state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS;
-            const float omegaSign = (frontOmega > 0.0f)   ? 1.0f
-                                    : (frontOmega < 0.0f) ? -1.0f
-                                                          : 0.0f;
-            const float limitedFrontOmega =
-                omegaSign * fminf(fabsf(frontOmega), redlineWheelOmegaRadS);
-            state->wheels[WHEEL_FRONT_LEFT].angularVelocityRadS = limitedFrontOmega;
-            state->wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS = limitedFrontOmega;
-        }
-        if (frontShare < 1.0f) {
-            const float rearOmega = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
-            const float omegaSign = (rearOmega > 0.0f)   ? 1.0f
-                                    : (rearOmega < 0.0f) ? -1.0f
-                                                         : 0.0f;
-            const float limitedRearOmega =
-                omegaSign * fminf(fabsf(rearOmega), redlineWheelOmegaRadS);
-            state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS = limitedRearOmega;
-            state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS = limitedRearOmega;
-        }
+        if (frontShare > 0.0f)
+            locked_axle_clamp_redline(state, WHEEL_FRONT_LEFT, WHEEL_FRONT_RIGHT,
+                                      redlineWheelOmegaRadS);
+        if (frontShare < 1.0f)
+            locked_axle_clamp_redline(state, WHEEL_REAR_LEFT, WHEEL_REAR_RIGHT,
+                                      redlineWheelOmegaRadS);
     }
     {
         float postOmega[WHEEL_COUNT];
