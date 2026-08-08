@@ -162,8 +162,35 @@ static void scenario_telemetry(void)
                           strstr(header, "on_track") != NULL &&
                           strstr(header, "distance_to_centerline_m") != NULL,
                       "the Phase 5 lap-validation columns are in the header");
+                check(strstr(header, "slip_angle_front_left_rad") != NULL &&
+                          strstr(header, "slip_angle_front_right_rad") != NULL &&
+                          strstr(header, "slip_angle_rear_left_rad") != NULL &&
+                          strstr(header, "slip_angle_rear_right_rad") != NULL &&
+                          strstr(header, "slip_ratio_front_left") != NULL &&
+                          strstr(header, "slip_ratio_front_right") != NULL &&
+                          strstr(header, "slip_ratio_rear_left") != NULL &&
+                          strstr(header, "slip_ratio_rear_right") != NULL,
+                      "the per-wheel slip columns are in the header");
             }
         }
+    }
+
+    /* The per-wheel slip columns must carry the wheel states the tire model was evaluated at,
+     * wired to the correct axle. The axle columns are defined as the mean of their two wheels,
+     * so that identity is what pins the front/rear halves of the projection in place. */
+    {
+        const TelemetryRow row = test_telemetry_row_from_game(game, 1);
+        check(isfinite(row.slipAngleFrontLeftRad) && isfinite(row.slipAngleFrontRightRad) &&
+                  isfinite(row.slipAngleRearLeftRad) && isfinite(row.slipAngleRearRightRad) &&
+                  isfinite(row.slipRatioFrontLeft) && isfinite(row.slipRatioFrontRight) &&
+                  isfinite(row.slipRatioRearLeft) && isfinite(row.slipRatioRearRight),
+              "every per-wheel slip column is finite");
+        check(fabsf(0.5f * (row.slipRatioFrontLeft + row.slipRatioFrontRight) -
+                    row.frontSlipRatio) < 1e-6f,
+              "front_slip_ratio is the mean of the two front wheel columns");
+        check(fabsf(0.5f * (row.slipRatioRearLeft + row.slipRatioRearRight) -
+                    row.rearSlipRatio) < 1e-6f,
+              "rear_slip_ratio is the mean of the two rear wheel columns");
     }
 
     /* Failure handling: an unwritable path must be reported, not ignored. The writer logs

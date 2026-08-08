@@ -31,7 +31,10 @@
     "steering_input,throttle_input,brake_input,handbrake_input,"                              \
     "surface_front_left,surface_front_right,surface_rear_left,surface_rear_right,"            \
     "checkpoint_index,lap_index,lap_state,checkpoint_event,crash_lockout_s,"                  \
-    "distance_to_centerline_m,on_track"
+    "distance_to_centerline_m,on_track,"                                                      \
+    "slip_angle_front_left_rad,slip_angle_front_right_rad,slip_angle_rear_left_rad,"          \
+    "slip_angle_rear_right_rad,slip_ratio_front_left,slip_ratio_front_right,"                 \
+    "slip_ratio_rear_left,slip_ratio_rear_right"
 
 const char *telemetry_header(void)
 {
@@ -122,7 +125,8 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,"
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%" PRIu32 ","
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%"
-        ".6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d\n",
+        ".6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,"
+        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
         row->tick, row->timeS, (double)row->positionXM, (double)row->positionYM,
         (double)row->headingRad, (double)row->velocityLongitudinalMps,
         (double)row->velocityLateralMps, (double)row->speedMps, (double)row->yawRateRadS,
@@ -150,7 +154,11 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         (double)row->handbrakeInput, row->surfaceFrontLeft, row->surfaceFrontRight,
         row->surfaceRearLeft, row->surfaceRearRight, row->checkpointIndex, row->lapIndex,
         row->lapState, row->checkpointEvent, (double)row->crashLockoutS,
-        (double)row->distanceToCenterlineM, row->onTrack);
+        (double)row->distanceToCenterlineM, row->onTrack, (double)row->slipAngleFrontLeftRad,
+        (double)row->slipAngleFrontRightRad, (double)row->slipAngleRearLeftRad,
+        (double)row->slipAngleRearRightRad, (double)row->slipRatioFrontLeft,
+        (double)row->slipRatioFrontRight, (double)row->slipRatioRearLeft,
+        (double)row->slipRatioRearRight);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;
