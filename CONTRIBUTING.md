@@ -90,6 +90,13 @@ physics regression. Do it only when you meant to change physics, and **say so in
 message, with what changed and why the new numbers are right**. A baseline update that says
 "update baselines" is indistinguishable from a bug being blessed.
 
+**The baselines are platform-specific.** They are recorded on Windows/UCRT64, and the
+tolerances are tight enough that a different libm does not reproduce them — the first CI run
+breached 13 of 46 comparisons on Linux, all longitudinal, with identical aggregate metrics
+but large single-row deltas. That is a discrete event landing one tick apart, not drifting
+physics: the scenario assertions pass identically on both hosts. So `make regression` is
+gated on the Windows job only, and re-record baselines on Windows.
+
 ## Hot reload
 
 The game is a thin platform layer (`build/dev/drifty.exe`) plus a reloadable module

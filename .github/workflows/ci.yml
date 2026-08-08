@@ -99,8 +99,19 @@ jobs:
       - name: Python lint and format
         run: make DRIFTY_STRICT=1 lint-py
 
-      - name: Physics scenarios and baseline regression
-        run: make DRIFTY_STRICT=1 test-physics regression
+      # test-physics only. `regression` is deliberately NOT run here.
+      #
+      # tests/baselines/ is recorded on Windows/UCRT64, and the comparison tolerances are
+      # tight enough that a different libm does not reproduce them: the first CI run breached
+      # 13 of 46 comparisons, all of them longitudinal (brake-*, lift-off*, accel-load,
+      # launch_stop), with identical aggregate metrics but large single-row deltas — the
+      # signature of a discrete event landing one tick apart, not of drifting physics.
+      #
+      # The scenario assertions themselves pass identically on both hosts (110 scenarios,
+      # 5768 checks), so behaviour is not in question; byte-level reproduction across libms
+      # is, and the project has never claimed it. Windows CI gates the baselines.
+      - name: Physics scenarios
+        run: make DRIFTY_STRICT=1 test-physics
 
       # This is the only place the sanitizers actually run; the UCRT64 job skips them by
       # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
