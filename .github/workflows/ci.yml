@@ -16,7 +16,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -54,18 +53,18 @@ jobs:
             clang:p
             clang-tools-extra:p
             cppcheck:p
+            gcovr:p
             python:p
+
+      - name: Install pinned Python tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
       - name: Resolved toolchain
         run: make info
 
-      # The C half of `verify`, named explicitly. lint-py is deliberately not run here: it is
-      # host-independent, and the only ruff available to MSYS2's Python is the pacman build,
-      # which tracks a different version from the pinned one in requirements-dev.txt.
-      # Two ruff versions would disagree about formatting and fail a job nobody can reproduce.
-      # The Linux job runs it instead, once, from the pin.
-      - name: Verify (format, lint, analyze, physics, regression)
-        run: make DRIFTY_STRICT=1 format-check lint analyze test-physics regression
+      # `verify` includes the pinned ruff check, so both CI jobs exercise the same project gate.
+      - name: Verify (format, Python, lint, analyze, physics, regression)
+        run: make DRIFTY_STRICT=1 verify
 
   linux-headless:
     name: Linux headless (+ sanitizers)
@@ -78,7 +77,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang clang-format cppcheck
+            clang clang-format cppcheck gcovr
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
@@ -100,8 +99,7 @@ jobs:
       - name: Resolved toolchain
         run: make info
 
-      # Host-independent, so it runs here only rather than on both jobs. See the note in the
-      # UCRT64 job for why it is not part of that one.
+      # Host-independent; both CI jobs exercise the same pinned Python gate.
       - name: Python lint and format
         run: make DRIFTY_STRICT=1 lint-py
 

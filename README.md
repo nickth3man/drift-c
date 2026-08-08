@@ -76,7 +76,7 @@ winget install -e --id MSYS2.MSYS2 --accept-package-agreements --accept-source-a
 2. Install the project toolchain and raylib 6.0 from the MSYS2 package manager:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
+powershell -ExecutionPolicy Bypass -File tools\setup\setup_windows.ps1
 ```
 
 That script is idempotent. It installs (when missing):
