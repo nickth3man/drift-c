@@ -6,6 +6,13 @@ Usage:
         artifacts/validation/20260807-120000-chicane_v1-abc1234
     python tools/validation/compare_runs.py artifacts/validation/latest/rwd_grip \
         artifacts/validation/previous/rwd_grip
+
+Two levels of diff. run.json gives the scalar summary — pass/fail transitions, lap-time deltas
+and per-metric deltas. The telemetry CSVs give the time series, which is delegated to
+tools/telemetry/compare_telemetry.py so there is one tolerance model rather than two. Pass
+--quiet to keep the per-case time-series report out of the way and see only the table.
+
+Exit status reflects pass/fail transitions only; telemetry differences are reported.
 """
 
 from __future__ import annotations
@@ -15,6 +22,13 @@ import json
 import os
 import sys
 from typing import Any, Dict, List
+
+# Same sys.path mutation the tools/telemetry scripts use: they are run by path rather than as
+# a package, so the import genuinely cannot come first.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "telemetry"))
+
+import compare_telemetry as ct  # noqa: E402
+import telemetry_common as tc  # noqa: E402
 
 
 def load_json(path: str) -> Dict[str, Any] | None:
@@ -71,6 +85,35 @@ def compare_single_run(path_a: str, path_b: str, quiet: bool = False) -> Dict[st
     }
 
 
+def compare_run_telemetry(path_a: str, path_b: str, quiet: bool = False) -> str:
+    """Delegate the time-series diff of two runs to tools/telemetry/compare_telemetry.py.
+
+    run.json carries only the scalar summary; the CSV is where a handling change actually shows
+    up. Returns a short cell for the summary table: "-" when either side has no CSV, "clean"
+    when nothing breached, or the breach count broken down by the kind telemetry_common
+    assigns ("exact" means a structural difference such as tick count or gear sequence).
+    """
+    csv_a = os.path.join(path_a, "telemetry.csv")
+    csv_b = os.path.join(path_b, "telemetry.csv")
+    if not (os.path.exists(csv_a) and os.path.exists(csv_b)):
+        return "-"
+
+    breaches: List[tc.Difference]
+    try:
+        _, breaches = ct.compare_pair(csv_a, csv_b, quiet)
+    except Exception as e:
+        print(f"WARNING: telemetry diff failed for '{csv_a}' vs '{csv_b}': {e}")
+        return "error"
+
+    if not breaches:
+        return "clean"
+
+    by_kind: Dict[str, int] = {}
+    for difference in breaches:
+        by_kind[difference.kind] = by_kind.get(difference.kind, 0) + 1
+    return ",".join(f"{count} {kind}" for kind, count in sorted(by_kind.items()))
+
+
 def compare_suites(dir_a: str, dir_b: str, quiet: bool = False) -> int:
     suite_a_path = os.path.join(dir_a, "suite.json")
     suite_b_path = os.path.join(dir_b, "suite.json")
@@ -112,11 +155,20 @@ def compare_suites(dir_a: str, dir_b: str, quiet: bool = False) -> int:
         all_cars = sorted(set(sub_a).union(sub_b))
 
     print(f"Comparing Validation Suites / Runs:\n  A: {dir_a}\n  B: {dir_b}\n")
+
+    # The per-case time-series diffs print their own detailed report, so run them before the
+    # summary table rather than interleaving the two.
+    telemetry_cells: Dict[str, str] = {}
+    for car in all_cars:
+        telemetry_cells[car] = compare_run_telemetry(
+            run_dir(dir_a, cars_a.get(car), car), run_dir(dir_b, cars_b.get(car), car), quiet
+        )
+
     print(
         f"{'CASE':<28} {'STATUS A':<10} {'STATUS B':<10} "
-        f"{'LAP A (s)':<12} {'LAP B (s)':<12} {'DELTA (s)':<10}"
+        f"{'LAP A (s)':<12} {'LAP B (s)':<12} {'DELTA (s)':<10} {'TELEMETRY':<16}"
     )
-    print("-" * 84)
+    print("-" * 101)
 
     regressions = 0
 
@@ -146,10 +198,19 @@ def compare_suites(dir_a: str, dir_b: str, quiet: bool = False) -> int:
 
         print(
             f"{car:<28} {status_a:<10} {status_b:<10} "
-            f"{time_a:<12.3f} {time_b:<12.3f} {delta:<+10.3f}{status_flag}"
+            f"{time_a:<12.3f} {time_b:<12.3f} {delta:<+10.3f} "
+            f"{telemetry_cells.get(car, '-'):<16}{status_flag}"
         )
 
-    print("-" * 84)
+    print("-" * 101)
+
+    # Telemetry breaches are reported, never gated: after an intentional handling change every
+    # car's time series is expected to move, and failing on that would make the tool useless
+    # for the loop it exists to serve. Only a pass/fail transition is a regression.
+    breached = [c for c, cell in telemetry_cells.items() if cell not in ("-", "clean")]
+    if breached:
+        print(f"NOTE: {len(breached)} case(s) with telemetry differences beyond tolerance.")
+
     if regressions > 0:
         print(f"RESULT: FAIL ({regressions} case regression(s) detected)")
         return 1
@@ -161,7 +222,9 @@ def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dir_a", help="first validation suite/run directory")
     parser.add_argument("dir_b", help="second validation suite/run directory")
-    parser.add_argument("--quiet", action="store_true", help="suppress detailed metrics")
+    parser.add_argument(
+        "--quiet", action="store_true", help="suppress the per-case time-series report"
+    )
     args = parser.parse_args(argv)
 
     return compare_suites(args.dir_a, args.dir_b, args.quiet)

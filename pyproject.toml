@@ -39,6 +39,10 @@ select = [
 # they are run by path rather than as a package. The import genuinely cannot come first.
 "tools/telemetry/*.py" = ["E402"]
 
+# compare_runs.py reaches across to tools/telemetry for the time-series diff and mutates
+# sys.path the same way, for the same reason.
+"tools/validation/compare_runs.py" = ["E402"]
+
 # The SVG writer emits one element per f-string. Those literals are genuinely longer than
 # the limit and neither the formatter nor implicit concatenation improves them — splitting
 # `<text x=... y=... fill=... font-size=...>` across lines makes the markup harder to read,
