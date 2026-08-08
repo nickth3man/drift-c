@@ -410,7 +410,10 @@ bundles capture it with no extra work.
 events, summary metrics, and an explicit pass/fail with a reason.
 
 **Files.** `src/game/telemetry.h/.c`, `tests/support/simulation_fixture.c`, new
-`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`, new `docs/VALIDATION_SCHEMA.md`.
+`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`.
+
+> `docs/VALIDATION_SCHEMA.md` was planned here and **was not written** — see the status section
+> for what carries the schema instead. Listed as deferred rather than quietly dropped.
 
 **Retain.** The entire existing `TelemetryRow` schema and column order — the header comment already
 establishes "append, never rename" as the convention, and `tests/baselines/` depends on it.
@@ -418,8 +421,15 @@ establishes "append, never rename" as the convention, and `tests/baselines/` dep
 **Change — append to `TelemetryRow`:**
 `checkpointIndex`, `lapIndex`, `lapState` (0 out-lap / 1 timed / 2 complete / 3 aborted),
 `checkpointEvent` (0 none / 1 in-order / 2 out-of-order / 3 lap-complete), `collisionEvent`,
-`distanceToCenterlineM`, `onTrack`, and the two missing per-wheel slip columns (FR and RR — only FL and
-RL are written today), so four-wheel diagnosis is possible.
+`distanceToCenterlineM`, `onTrack`, and per-wheel slip columns, so four-wheel diagnosis is possible.
+
+**As built, all four wheels are appended for both slip angle and slip ratio**, not the two the
+axle columns appear to omit. This paragraph originally called for FR and RR only, on the reading
+that FL and RL were already written. That reading was wrong: `front_slip_angle_rad` is the
+bicycle-model *axle* angle from `physics_axle_slip_angles()` and `front_slip_ratio` is the *mean*
+of the two front wheels, so neither equals its left wheel. Appending only FR and RR would have put
+two genuinely different quantities in columns that look like a matched set. The axle columns keep
+their names and meaning, per append-never-rename.
 
 Everything else on the requested telemetry list is **already present**: time, tick, position, heading,
 `velocityLongitudinal/Lateral`, speed, yaw rate, steering angle, rpm, gear, per-axle slip angle and slip
@@ -656,6 +666,15 @@ geometry was changed to make any car pass. Every car laps on the shared config a
 Known cosmetic defect, not blocking: in the captured frame the validation overlay's
 steer/throttle/brake panel overlaps the game HUD's speed card, so the HUD's gear readout sits
 under the brake bar. The diagnostic overlay's own fields are all legible.
+
+**Deferred from Phase 5: `docs/VALIDATION_SCHEMA.md` was never written.** No acceptance criterion
+requires it — criterion 6 names the `run.json` keys directly, and it is the only place the schema
+is gated. Today the schema lives in three places that are checked by the build rather than by
+reading: the `TelemetryRow` field list and its header comment in `src/game/telemetry.h`, whose
+column order is generated from the same list the row writer formats; the key order in
+`src/game/run_report.c`; and the tolerance table in `tools/telemetry/telemetry_common.py`. A prose
+copy would be a fourth, unchecked, and would be wrong the first time a column is appended without
+it. Worth writing when it can be generated from the field list rather than hand-maintained.
 
 ---
 
