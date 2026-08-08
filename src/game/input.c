@@ -34,6 +34,31 @@ bool input_has_oneshot(const Input *in)
 
 #include "raylib.h"
 
+/* Keyboard pedal travel, in fraction of full travel per second. A key is a switch, but the
+ * car is driven with analogue triggers and the whole control chain is analogue: handing the
+ * physics an instant 0->1 step asks it for a pedal movement no trigger can make. These ramp
+ * the key to the same travel speed the AI driver is held to (ai_driver.h), so keyboard play
+ * and controller play present the same kind of signal.
+ *
+ * Module-static, and therefore reset by a hot reload — one frame of pedal travel, which is
+ * why this is not worth putting on Game. */
+#define KB_PEDAL_PRESS_RATE_PER_S 5.0f    /* 200 ms to full travel */
+#define KB_PEDAL_RELEASE_RATE_PER_S 10.0f /* 100 ms back to rest */
+
+static float s_kbThrottleTravel;
+static float s_kbBrakeTravel;
+
+static float kb_pedal_ramp(float current, bool held, float dt)
+{
+    const float target = held ? 1.0f : 0.0f;
+    const float rate = held ? KB_PEDAL_PRESS_RATE_PER_S : KB_PEDAL_RELEASE_RATE_PER_S;
+    const float maxStep = rate * dt;
+    const float delta = target - current;
+    if (delta > maxStep) return current + maxStep;
+    if (delta < -maxStep) return current - maxStep;
+    return target;
+}
+
 /* Radial deadzone for the left stick. Returns the deadzone-corrected x deflection.
  * The y is passed only to compute the radial magnitude; it is not returned because
  * Drifty only uses the X axis for steering. Values outside the deadzone are rescaled
@@ -64,8 +89,17 @@ void input_sample(Input *in)
     if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) kb_steer += 1.0f;
     if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) kb_steer -= 1.0f;
     kb_steer = clampf(kb_steer, -1.0f, 1.0f);
-    const float kb_throttle = (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) ? 1.0f : 0.0f;
-    const float kb_brake = (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) ? 1.0f : 0.0f;
+
+    /* Pedals ramp rather than step, so a key produces a trigger-shaped signal. Steering is
+     * left alone: it is already an axis the stick drives directly, and the merge below lets a
+     * partially-deflected stick win over a key. */
+    const float frameDt = GetFrameTime();
+    s_kbThrottleTravel =
+        kb_pedal_ramp(s_kbThrottleTravel, IsKeyDown(KEY_W) || IsKeyDown(KEY_UP), frameDt);
+    s_kbBrakeTravel =
+        kb_pedal_ramp(s_kbBrakeTravel, IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN), frameDt);
+    const float kb_throttle = s_kbThrottleTravel;
+    const float kb_brake = s_kbBrakeTravel;
     const float kb_handbrake = IsKeyDown(KEY_SPACE) ? 1.0f : 0.0f;
 
     /* --- Gamepad sample (gamepad 0 if available) --- */

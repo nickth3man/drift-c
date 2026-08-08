@@ -625,5 +625,15 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
                    game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId == SURFACE_ASPHALT)
                       ? 1
                       : 0;
+
+    /* Per-wheel slip, straight off the wheel states the tire model was evaluated at. */
+    row.slipAngleFrontLeftRad = game->vehicle.wheels[WHEEL_FRONT_LEFT].slipAngleRad;
+    row.slipAngleFrontRightRad = game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipAngleRad;
+    row.slipAngleRearLeftRad = game->vehicle.wheels[WHEEL_REAR_LEFT].slipAngleRad;
+    row.slipAngleRearRightRad = game->vehicle.wheels[WHEEL_REAR_RIGHT].slipAngleRad;
+    row.slipRatioFrontLeft = game->vehicle.wheels[WHEEL_FRONT_LEFT].slipRatio;
+    row.slipRatioFrontRight = game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio;
+    row.slipRatioRearLeft = game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio;
+    row.slipRatioRearRight = game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio;
     return row;
 }

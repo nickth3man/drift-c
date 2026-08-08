@@ -155,8 +155,12 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
                src/game/car_roster.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
                src/game/telemetry.c src/game/ai_driver.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
+               src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c
-DEV_SRCS    := src/dev/dev_state.c src/dev/failure_bundle.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
+# failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,
+# which links SHARED_SRCS but not GAME_SRCS. Its own dependencies (dev_params, dev_replay,
+# replay) are already here, and it holds no static state, so both binaries can carry a copy.
+DEV_SRCS    := src/dev/dev_state.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
 DEV_UI_SRCS := src/dev/dev_lab.c
 GAME_SRCS   := src/game/game.c src/game/audio.c src/physics/auto_transmission.c src/game/particle.c \
                src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c \

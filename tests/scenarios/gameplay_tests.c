@@ -873,8 +873,17 @@ static void scenario_ai_lap(void)
     bool handbrakeEverSet = false;
     bool bothPedalsEverSet = false;
     int fullThrottleTicks = 0;
+    int longestFullThrottleRun = 0;
+    int currentFullThrottleRun = 0;
+    float throttleSumTicks = 0.0f;
     int brakingTicks = 0;
     float prevLockoutS = 0.0f;
+
+    /* Pedal travel per tick, to prove the driver emits a signal a trigger could produce. */
+    float prevThrottle = 0.0f;
+    float maxThrottleStep = 0.0f;
+    int throttleReversals = 0;
+    float prevThrottleStep = 0.0f;
 
     for (int tick = 0; tick < budgetTicks && game->track.lap < targetLaps; tick++) {
         ai_driver_update(&cfg, &ai, &game->track, &game->vehicle, &game->derived, &game->spec,
@@ -882,8 +891,26 @@ static void scenario_ai_lap(void)
 
         if (game->input.handbrake != 0.0f) handbrakeEverSet = true;
         if (game->input.throttle > 0.0f && game->input.brake > 0.0f) bothPedalsEverSet = true;
-        if (game->input.throttle >= 0.999f) fullThrottleTicks++;
+        if (game->input.throttle >= 0.999f) {
+            fullThrottleTicks++;
+            currentFullThrottleRun++;
+            if (currentFullThrottleRun > longestFullThrottleRun)
+                longestFullThrottleRun = currentFullThrottleRun;
+        } else {
+            currentFullThrottleRun = 0;
+        }
+        throttleSumTicks += game->input.throttle;
         if (game->input.brake > 0.0f) brakingTicks++;
+
+        {
+            const float step = game->input.throttle - prevThrottle;
+            if (tick > 0 && fabsf(step) > maxThrottleStep) maxThrottleStep = fabsf(step);
+            if (step * prevThrottleStep < 0.0f &&
+                (fabsf(step) > 1.0e-4f || fabsf(prevThrottleStep) > 1.0e-4f))
+                throttleReversals++;
+            prevThrottleStep = step;
+            prevThrottle = game->input.throttle;
+        }
 
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
@@ -934,10 +961,40 @@ static void scenario_ai_lap(void)
     printf("    ai-lap           peak friction usage %.3f  grip-limited %.1f%% of the lap\n",
            (double)peakFrictionUsage,
            100.0 * (double)ticksNearLimit / (double)(ticksRun ? ticksRun : 1));
-    check(fullThrottleTicks > ticksRun / 4,
-          "the driver uses full throttle whenever the speed envelope permits (%d/%d ticks)",
-          fullThrottleTicks, ticksRun);
+    /* The driver commits to the power when the envelope allows it. This is measured as a
+     * sustained stretch at the stop plus the mean pedal position over the lap, not as a share
+     * of ticks pinned at exactly 1.0: the pedal is rate limited, so it spends part of every
+     * application travelling, and time-at-the-rail alone would fall as pedal fidelity rose.
+     * Holding full throttle for half a second is what "uses the envelope" actually means. */
+    const float meanThrottle = (ticksRun > 0) ? throttleSumTicks / (float)ticksRun : 0.0f;
+    printf("    ai-lap           throttle mean %.2f  full %.1f%%  longest full run %.2f s"
+           "  max step/tick %.3f  reversals %.2f/s\n",
+           (double)meanThrottle,
+           100.0 * (double)fullThrottleTicks / (double)(ticksRun ? ticksRun : 1),
+           (double)longestFullThrottleRun * (double)FIXED_DT_S, (double)maxThrottleStep,
+           (double)throttleReversals / ((double)ticksRun * (double)FIXED_DT_S));
+    check(longestFullThrottleRun >= 60,
+          "the driver holds full throttle for at least 0.5 s somewhere on the lap (%.2f s)",
+          (double)longestFullThrottleRun * (double)FIXED_DT_S);
+    check(meanThrottle > 0.35f,
+          "the driver uses the speed envelope rather than crawling "
+          "(mean throttle %.2f)",
+          (double)meanThrottle);
     check(brakingTicks > 0, "the driver brakes for upcoming curvature instead of coasting");
+
+    /* The car is driven with analogue triggers, so the driver must produce a signal a trigger
+     * could actually produce: bounded travel per tick, and no per-tick reversal storm. The
+     * original controller read an instantaneous friction reading proportionally and emitted a
+     * square wave — >0.5 swings on half of all frames — which no physical pedal can make. */
+    const float pedalCeilingPerTick =
+        fmaxf(cfg.pedalPressRatePerS, cfg.pedalReleaseRatePerS) * FIXED_DT_S;
+    check(
+        maxThrottleStep <= pedalCeilingPerTick + 1.0e-4f,
+        "throttle never moves faster than the pedal can travel (max %.4f per tick, limit %.4f)",
+        (double)maxThrottleStep, (double)pedalCeilingPerTick);
+    check((double)throttleReversals / ((double)ticksRun * (double)FIXED_DT_S) < 8.0,
+          "the throttle does not chatter (%.2f direction reversals per second)",
+          (double)throttleReversals / ((double)ticksRun * (double)FIXED_DT_S));
 
     /* --- What the driver is contractually forbidden from doing --- */
     check(!handbrakeEverSet, "the driver never pulls the handbrake");
@@ -1084,6 +1141,13 @@ static void scenario_ai_roster_laps(void)
     AiDriverConfig cfg;
     ai_driver_config_default(&cfg);
 
+    /* Milestone 1 acceptance criterion 10: one config drives all six cars. The bytes are
+     * snapshotted here and re-checked after every car, so per-car AI tuning -- the sanctioned
+     * way to make a car that cannot lap appear to pass -- fails this scenario rather than
+     * quietly becoming the new baseline. */
+    AiDriverConfig cfgAtStart;
+    memcpy(&cfgAtStart, &cfg, sizeof(cfg));
+
     const int rosterCount = car_roster_count();
     check(rosterCount == 6, "car roster holds 6 cars");
 
@@ -1127,6 +1191,8 @@ static void scenario_ai_roster_laps(void)
               game->track.lap, ticksRun);
         check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
               outOfOrder);
+        check(memcmp(&cfg, &cfgAtStart, sizeof(cfg)) == 0,
+              "car '%s' was driven with the unmodified shared AiDriverConfig", carId);
 
         track_free(&game->track);
         free(game);

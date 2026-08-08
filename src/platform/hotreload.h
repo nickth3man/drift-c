@@ -99,7 +99,7 @@ typedef struct ValidationOverlayData ValidationOverlayData;
     ENTRY(game_spawn_on_track, bool, Game *)                                              \
     ENTRY(game_spawn_on_track_at, bool, Game *, int)                                      \
     ENTRY(game_telemetry_row, TelemetryRow, const Game *, int)                            \
-    ENTRY(render_draw_validation_overlay, void, const ValidationOverlayData *)
+    ENTRY(render_set_validation_overlay, void, const ValidationOverlayData *)
 
 /* Function types, needed by every configuration. */
 #define ENTRY(name, ret, ...) typedef ret(name##_t)(__VA_ARGS__);

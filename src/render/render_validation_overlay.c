@@ -9,16 +9,54 @@
  */
 #if !defined(DRIFTY_HEADLESS)
 
-#include "render/render.h"
+#include "render/render_internal.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "raylib.h"
 #include "core/units.h"
 
-GAME_API void render_draw_validation_overlay(const ValidationOverlayData *data)
+/* The staged overlay. Module-static rather than a field on Game because ValidationOverlayData
+ * holds string pointers, and nothing reachable from Game may point into module memory
+ * (game.h). Losing the staging across a hot reload costs one frame of overlay and nothing
+ * else; the offline capture that uses it never reloads. */
+static ValidationOverlayData s_staged;
+static bool s_stagedValid;
+static char s_stagedCarId[64];
+static char s_stagedCarDisplayName[96];
+
+static void copy_bounded(char *dst, size_t cap, const char *src)
 {
-    if (data == NULL) return;
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    const size_t n = strlen(src);
+    const size_t take = (n < cap - 1) ? n : cap - 1;
+    memcpy(dst, src, take);
+    dst[take] = '\0';
+}
+
+GAME_API void render_set_validation_overlay(const ValidationOverlayData *data)
+{
+    if (data == NULL) {
+        s_stagedValid = false;
+        return;
+    }
+
+    s_staged = *data;
+    copy_bounded(s_stagedCarId, sizeof(s_stagedCarId), data->carId);
+    copy_bounded(s_stagedCarDisplayName, sizeof(s_stagedCarDisplayName), data->carDisplayName);
+    s_staged.carId = s_stagedCarId;
+    s_staged.carDisplayName = s_stagedCarDisplayName;
+    s_stagedValid = true;
+}
+
+void render_draw_staged_validation_overlay(void)
+{
+    if (!s_stagedValid) return;
+    const ValidationOverlayData *data = &s_staged;
 
     /* Fixed 1280x720 canvas dimensions used by the production capture pipeline. */
     const int screenW = GetScreenWidth();
@@ -111,7 +149,7 @@ GAME_API void render_draw_validation_overlay(const ValidationOverlayData *data)
 
 #include "render/render.h"
 
-void render_draw_validation_overlay(const ValidationOverlayData *data)
+void render_set_validation_overlay(const ValidationOverlayData *data)
 {
     (void)data;
 }

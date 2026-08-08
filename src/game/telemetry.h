@@ -112,6 +112,26 @@ typedef struct {
     float crashLockoutS; /* seconds left in post-impact lockout; rising edge = collision */
     float distanceToCenterlineM; /* nearest-segment distance, signed magnitude */
     int onTrack;                 /* 1 iff all four wheels report the racing surface */
+
+    /* Phase 5: per-wheel slip, so a diagnosis can distinguish the two wheels on an axle —
+     * inside/outside load split, one locked wheel, a differential sending torque to the
+     * unloaded side. These are the values the tire model is actually evaluated at
+     * (physics.c computes them per wheel), not a reconstruction.
+     *
+     * All four wheels are written for both quantities rather than only the two the axle
+     * columns omit, because the axle columns are not wheel values: `front_slip_angle_rad`
+     * is the bicycle-model axle slip angle from physics_axle_slip_angles(), and
+     * `front_slip_ratio` is the mean of the two front wheels. Neither equals its left
+     * wheel, so appending only FR/RR would pair columns that do not mean the same thing.
+     * The axle columns keep their names and their meaning, per append-never-rename. */
+    float slipAngleFrontLeftRad;
+    float slipAngleFrontRightRad;
+    float slipAngleRearLeftRad;
+    float slipAngleRearRightRad;
+    float slipRatioFrontLeft;
+    float slipRatioFrontRight;
+    float slipRatioRearLeft;
+    float slipRatioRearRight;
 } TelemetryRow;
 
 typedef struct {

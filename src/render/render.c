@@ -224,6 +224,10 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     dev_lab_draw_ui(game);
     DRIFTY_ZONE_END(lab);
 
+    /* Inside the frame, because EndDrawing() below both flushes the batch and swaps: an
+     * overlay drawn after game_draw() returns never reaches the buffer the capture reads. */
+    render_draw_staged_validation_overlay();
+
     EndDrawing();
     DRIFTY_ZONE_END(render);
     DRIFTY_FRAME_MARK();
