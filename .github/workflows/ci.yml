@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   windows-ucrt64:
-    name: Windows UCRT64 (canonical)
+    name: Windows UCRT64 (canonical) (required)
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -73,7 +73,7 @@ jobs:
         run: make DRIFTY_STRICT=1 verify
 
   linux-headless:
-    name: Linux headless (+ sanitizers)
+    name: Linux headless (+ sanitizers) (optional)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
