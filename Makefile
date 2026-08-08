@@ -36,6 +36,7 @@
 #   make lint             cppcheck                   make analyze       clang --analyze
 #   make fuzz             build and briefly run the libFuzzer targets (clang)
 #   make clean            remove every generated artifact
+#   make clean-artifacts  reap run evidence, keeping the KEEP newest failure bundles (10)
 #   make info             print the resolved toolchain and linkage
 #   make help             this list
 #
@@ -236,7 +237,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         validate-hotreload compare-rgba measure-rotation record \
-        clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
+        clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
 all: dev
@@ -704,3 +705,33 @@ clean:
 
 clean-telemetry:
 	rm -f $(TELEMETRY)/*.csv $(TELEMETRY)/*.png
+
+# Reap run evidence. artifacts/ is ignored, so nothing here ever reaps itself — it had grown
+# to 959 MB across 142 entries, 116 of them failure bundles, before this target existed.
+#
+#   make clean-artifacts          keep the 10 newest failure bundles
+#   make clean-artifacts KEEP=3   keep 3
+#   make clean-artifacts KEEP=0   keep none
+#
+# Failure bundles are the reproducible evidence for a specific defect, so the newest are kept
+# by default: the one you want is almost always from the run you just did. Everything else
+# under artifacts/ is regenerable by re-running the target that wrote it.
+KEEP ?= 10
+clean-artifacts:
+	@set -e; \
+	if [ ! -d $(ARTIFACTS) ]; then echo "clean-artifacts: nothing to do"; exit 0; fi; \
+	before=$$(du -sm $(ARTIFACTS) 2>/dev/null | cut -f1); \
+	bundles=$$(ls -1d $(ARTIFACTS)/failure-* 2>/dev/null | sort -r || true); \
+	total=$$(printf '%s\n' "$$bundles" | grep -c . || true); \
+	if [ "$$total" -gt "$(KEEP)" ]; then \
+	    printf '%s\n' "$$bundles" | tail -n +$$(($(KEEP) + 1)) | while read -r d; do \
+	        [ -n "$$d" ] && rm -rf "$$d"; \
+	    done; \
+	fi; \
+	rm -rf $(TELEMETRY) $(ARTIFACTS)/replays $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots \
+	       $(ARTIFACTS)/visual $(ARTIFACTS)/visual-diff $(ARTIFACTS)/corpus-cards \
+	       $(ARTIFACTS)/gallery-ingame $(ARTIFACTS)/recordings $(ARTIFACTS)/video \
+	       $(ARTIFACTS)/car_visual_failures $(ARTIFACTS)/racing_line $(ARTIFACTS)/validation; \
+	rm -f $(ARTIFACTS)/*.html $(ARTIFACTS)/*.md $(ARTIFACTS)/*.xml; \
+	after=$$(du -sm $(ARTIFACTS) 2>/dev/null | cut -f1 || echo 0); \
+	echo "clean-artifacts: kept $$(ls -1d $(ARTIFACTS)/failure-* 2>/dev/null | grep -c . || echo 0) of $$total failure bundle(s); $${before} MB -> $${after} MB"

@@ -37,11 +37,10 @@
 # fuzz corpora — all ephemeral run evidence, all under one ignored root. tests/baselines/ is
 # committed; nothing under artifacts/ ever is.
 /artifacts/
-# Legacy roots, superseded by artifacts/telemetry and build/packages.
+# Legacy roots, superseded by artifacts/. recording_output/ and debug/record/logs/ are gone:
+# record_gameplay.py writes to artifacts/recordings/ now.
 /telemetry/
 /dist/
-/recording_output/
-/debug/record/logs/
 
 # Reviewed, tracked, non-code inputs live under data/. The Physics Lab also SAVES named
 # profiles into data/vehicles/, so scratch output is ignored there while the reviewed

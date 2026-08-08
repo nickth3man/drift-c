@@ -23,7 +23,7 @@ if not defined MSYS2_ROOT set "MSYS2_ROOT=C:\msys64"
 if not exist "%MSYS2_ROOT%\ucrt64\bin\gcc.exe" (
     echo build.bat: MSYS2 UCRT64 not found at "%MSYS2_ROOT%". 1>&2
     echo Install with: winget install -e --id MSYS2.MSYS2 1>&2
-    echo Then run:     powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 1>&2
+    echo Then run:     powershell -ExecutionPolicy Bypass -File tools\setup\setup_windows.ps1 1>&2
     exit /b 127
 )
 
