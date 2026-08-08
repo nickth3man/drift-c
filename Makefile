@@ -752,9 +752,12 @@ endif
 
 # ---------------------------------------------------------------------- editor support --
 
+# --flag=value, not --flag value: RAYLIB_CFLAGS is empty on UCRT64 (raylib sits in the default
+# include path) but -Ithird_party/raylib-src/src on POSIX, and argparse reads a space-separated
+# value beginning with '-' as the next option rather than as the value.
 compile-commands:
 	$(PYTHON) tools/build/gen_compile_commands.py --output compile_commands.json \
-	    --raylib-cflags "$(RAYLIB_CFLAGS)"
+	    --raylib-cflags="$(RAYLIB_CFLAGS)"
 
 # -------------------------------------------------------------------------- housekeeping --
 
