@@ -1,6 +1,7 @@
 # Dynamic vehicle visual feedback
 
-Status: draft implementation contract
+Status: implemented. `VehicleVisualEffects` and `vehicle_visual_effects_derive()` are in
+`src/render/vehicle_effects.h`; this document is the contract they satisfy.
 
 ## Goal
 

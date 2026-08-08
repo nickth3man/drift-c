@@ -1,6 +1,9 @@
 # Derived vehicle primitives
 
-Status: draft implementation contract
+Status: implemented, with one exception. The derived fields described here exist on
+`CarVisual` in `src/render/car_visual.h` (`canardStrength`, `exhaustTransition`,
+`mirrorOffsetM` and the rest). `CarVisualRect` was never adopted — the rasterizer works
+in the primitives it already had.
 
 ## Problem
 

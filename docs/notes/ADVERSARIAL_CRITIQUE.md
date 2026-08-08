@@ -1,5 +1,14 @@
 # Deep Adversarial Critique: Drifty (Phase 2)
 
+> **Historical note, kept for its open findings.** This is a point-in-time evaluation from
+> 6 August 2026, not a description of how the game currently behaves. Its evidence base was
+> `recording_output/`, which no longer exists — `tools/recording/record_gameplay.py` writes to
+> `artifacts/recordings/` now. The ratings are stale.
+>
+> It is kept rather than deleted because §5 still lists at least one fix marked **Open** (the
+> centralised HUD overlay stack). Read the summary table as a backlog, not as current state,
+> and verify anything here against the code before acting on it.
+
 **Evaluated Artifact:** `build/dev/drifty.exe` & `build/dev/game.dll`
 **Evaluation Method:** Automated dynamic recording via `ffmpeg` (`recording_output/gameplay_full.mkv`), high-frequency screenshot extraction (`recording_output/frame_*.png`), animated GIF replay synthesis (`recording_output/gameplay_replay.gif`), interactive `computer` tool window automation, and Win32 key injection.
 **Date:** August 6, 2026

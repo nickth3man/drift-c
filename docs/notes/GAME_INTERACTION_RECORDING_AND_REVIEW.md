@@ -1,5 +1,15 @@
 # Research Report & Architecture Proposal: Agent-Operated Game Interaction Recording & Review
 
+> **Historical note. One of the five options below was built; the other four were not.**
+>
+> **System 3** (input-visual pipeline with a frame manifest) is what
+> [`tools/recording/record_gameplay.py`](../../tools/recording/record_gameplay.py) implements,
+> reachable as `make record`. This document is its design rationale, which is why it is kept.
+>
+> Systems 1, 2, 4, and 5 (Perfetto, RenderDoc, an in-game ImPlot scrubber, Rerun) were
+> surveyed and not adopted. Nothing here should be read as a commitment to them, and
+> `scripts/analyze_trace.py`, referenced under System 1, was never written.
+
 **Author:** Antigravity AI
 **Scope:** Deep Research across GitHub Awesome Lists (`calinou/awesome-gamedev`, `stevinz/awesome-game-engine-dev`, `FronkonGames/Awesome-Gamedev`, `AwesomeCppGameDev`), Reddit, and StackOverflow for Agent-Usable Game Recording, Telemetry, and Time-Travel Debugging Systems
 **Curated Repositories Researched:** `google/perfetto`, `baldurk/renderdoc`, `rr-debugger/rr`, `clementgallet/libTAS`, `univrsal/input-overlay`, `epezent/implot`, `rerun-io/rerun`, `wolfpld/tracy`, `Palanteer`

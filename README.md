@@ -8,6 +8,7 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
 - Setup, checks, and the hot-reload rules: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Design contracts and historical notes: [docs/](docs/README.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 - Notable changes: [CHANGELOG.md](CHANGELOG.md)
 

@@ -1,6 +1,7 @@
 # Stable procedural car identity
 
-Status: draft implementation contract
+Status: implemented. `CarAppearanceSpec` is defined in `src/render/car_appearance.h`;
+this document is the contract it satisfies, not a proposal.
 
 ## Problem
 
