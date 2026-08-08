@@ -207,9 +207,15 @@ def compare_suites(dir_a: str, dir_b: str, quiet: bool = False) -> int:
     # Telemetry breaches are reported, never gated: after an intentional handling change every
     # car's time series is expected to move, and failing on that would make the tool useless
     # for the loop it exists to serve. Only a pass/fail transition is a regression.
-    breached = [c for c, cell in telemetry_cells.items() if cell not in ("-", "clean")]
+    #
+    # "error" is counted separately from a breach. A CSV that could not be read is a broken
+    # comparison, not a measured difference, and reporting it as one understates the problem.
+    breached = [c for c, cell in telemetry_cells.items() if cell not in ("-", "clean", "error")]
+    errored = [c for c, cell in telemetry_cells.items() if cell == "error"]
     if breached:
         print(f"NOTE: {len(breached)} case(s) with telemetry differences beyond tolerance.")
+    if errored:
+        print(f"WARNING: {len(errored)} case(s) whose telemetry could not be compared at all.")
 
     if regressions > 0:
         print(f"RESULT: FAIL ({regressions} case regression(s) detected)")

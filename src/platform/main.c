@@ -601,6 +601,10 @@ static int run_validate_lap(Game *game, const Options *options)
     int outOfOrder = 0;
     bool allFinite = true;
     bool writeFailed = false;
+    /* Tick of the FIRST thing that went wrong, not the last. A run is not aborted by an
+     * out-of-order crossing, so without this the bundle would point at the tick budget for a
+     * fault that happened seconds in. 0 means nothing went wrong. */
+    uint64_t firstFaultTick = 0;
 
     replay_begin_recording(&game->replay, game->sim.tick);
 
@@ -610,9 +614,14 @@ static int run_validate_lap(Game *game, const Options *options)
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
 
-        if (game->lastCheckpointEvent.outOfOrder) outOfOrder++;
-        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y))
+        if (game->lastCheckpointEvent.outOfOrder) {
+            outOfOrder++;
+            if (firstFaultTick == 0) firstFaultTick = game->sim.tick;
+        }
+        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y)) {
             allFinite = false;
+            if (firstFaultTick == 0) firstFaultTick = game->sim.tick;
+        }
 
         if (ticksRun % VIDEO_TICKS_PER_FRAME == 0) {
             TelemetryRow row = game_telemetry_row(game, 1);
@@ -781,8 +790,11 @@ static int run_validate_lap(Game *game, const Options *options)
         bundle.telemetryPath = csvOpened ? csvPath : NULL;
         bundle.replay = &game->replay;
         bundle.spec = &game->spec;
-        bundle.failingTick = game->sim.tick;
+        bundle.failingTick = (firstFaultTick != 0) ? firstFaultTick : game->sim.tick;
         bundle.checksum = game->stateChecksum;
+        /* One check was run -- the run's own verdict -- and it failed. Leaving checksRun at 0
+         * made summary.json report the impossible pair checks_run 0 / checks_failed 1. */
+        bundle.checksRun = 1;
         bundle.checksFailed = 1;
 
         char bundleDir[512];
