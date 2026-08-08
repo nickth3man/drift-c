@@ -410,10 +410,11 @@ bundles capture it with no extra work.
 events, summary metrics, and an explicit pass/fail with a reason.
 
 **Files.** `src/game/telemetry.h/.c`, `tests/support/simulation_fixture.c`, new
-`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`.
+`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`, new
+`docs/design/VALIDATION_SCHEMA.md`.
 
-> `docs/VALIDATION_SCHEMA.md` was planned here and **was not written** — see the status section
-> for what carries the schema instead. Listed as deferred rather than quietly dropped.
+> Planned as `docs/VALIDATION_SCHEMA.md`; it landed one directory down, in
+> `docs/design/VALIDATION_SCHEMA.md`, when the root cleanup gave every design document that home.
 
 **Retain.** The entire existing `TelemetryRow` schema and column order — the header comment already
 establishes "append, never rename" as the convention, and `tests/baselines/` depends on it.
@@ -469,7 +470,7 @@ sampling rate:
              "build_commit": "...", "build_dirty": false, "final_state_checksum": "..." },
   "lap":   { "out_lap_time_s": 33.10, "timed_lap_time_s": 31.482,
              "checkpoints_passed": 8, "checkpoints_missed": 0, "out_of_order_events": 0 },
-  "metrics": { "...": "see above, units in every key or in docs/VALIDATION_SCHEMA.md" },
+  "metrics": { "...": "see above, units in every key or in docs/design/VALIDATION_SCHEMA.md" },
   "artifacts": { "telemetry_csv": "telemetry.csv", "video_mp4": "run.mp4",
                  "replay": "replay.txt" } }
 ```
@@ -667,14 +668,10 @@ Known cosmetic defect, not blocking: in the captured frame the validation overla
 steer/throttle/brake panel overlaps the game HUD's speed card, so the HUD's gear readout sits
 under the brake bar. The diagnostic overlay's own fields are all legible.
 
-**Deferred from Phase 5: `docs/VALIDATION_SCHEMA.md` was never written.** No acceptance criterion
-requires it — criterion 6 names the `run.json` keys directly, and it is the only place the schema
-is gated. Today the schema lives in three places that are checked by the build rather than by
-reading: the `TelemetryRow` field list and its header comment in `src/game/telemetry.h`, whose
-column order is generated from the same list the row writer formats; the key order in
-`src/game/run_report.c`; and the tolerance table in `tools/telemetry/telemetry_common.py`. A prose
-copy would be a fourth, unchecked, and would be wrong the first time a column is appended without
-it. Worth writing when it can be generated from the field list rather than hand-maintained.
+The schema document Phase 5 called for is
+[design/VALIDATION_SCHEMA.md](design/VALIDATION_SCHEMA.md), which covers the `run.json` and
+`suite.json` contracts. It is prose beside a schema the build generates, so it has to be updated
+by hand whenever a field is added — worth knowing when appending one.
 
 ---
 

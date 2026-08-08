@@ -2,9 +2,9 @@
  * run_report.c — the writer declared in run_report.h.
  *
  * One fprintf per JSON line, so the file is readable both as a diff target and by eye. Field
- * order matches docs/VALIDATION_SCHEMA.md. Numbers are emitted with enough precision that two
- * runs of the same inputs produce identical bytes (metrics are doubles from the reducer; the
- * deterministic telemetry is what makes them match).
+ * order matches docs/design/VALIDATION_SCHEMA.md. Numbers are emitted with enough precision
+ * that two runs of the same inputs produce identical bytes (metrics are doubles from the
+ * reducer; the deterministic telemetry is what makes them match).
  */
 #include "game/run_report.h"
 
