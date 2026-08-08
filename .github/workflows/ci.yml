@@ -78,6 +78,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # tidy-changed diffs against origin/main, which a depth-1 checkout does not have.
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -86,7 +89,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang clang-format cppcheck gcovr
+            clang clang-format clang-tidy cppcheck gcovr
           # A uv venv is user-owned, so it sidesteps both the externally-managed marker on
           # the /usr python and the root-only /usr/local site-packages. Its bin goes on PATH
           # so the Makefile's `command -v ruff` resolves.
@@ -116,6 +119,16 @@ jobs:
       # Host-independent; both CI jobs exercise the same pinned Python gate.
       - name: Python lint and format
         run: make DRIFTY_STRICT=1 lint-py
+
+      # clang-tidy on the files this branch actually touched. The whole tree carries ~112
+      # pre-existing findings, so a full-tree gate would fail every pull request over work
+      # nobody in that pull request caused; nightly reports the full count instead.
+      # Skipped on pushes to main, where there is no branch to diff against.
+      - name: clang-tidy (changed files)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch -q --no-tags origin "${{ github.base_ref }}"
+          make DRIFTY_STRICT=1 tidy-changed TIDY_BASE="origin/${{ github.base_ref }}"
 
       # test-physics only. `regression` is deliberately NOT run here.
       #

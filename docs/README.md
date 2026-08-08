@@ -20,6 +20,8 @@ Start elsewhere for the basics: [README](../README.md) for what Drifty is and ho
 | [DYNAMIC_CAR_VISUAL_EFFECTS](design/DYNAMIC_CAR_VISUAL_EFFECTS.md) | `VehicleVisualEffects` — dynamic feedback derived from vehicle state |
 | [CAR_SPRITE_ROTATION_STABILITY](design/CAR_SPRITE_ROTATION_STABILITY.md) | Measuring point-sampled rotation stability — `make measure-rotation` |
 | [CAR_VISUAL_RGBA_REGRESSION](design/CAR_VISUAL_RGBA_REGRESSION.md) | Pixel-level appearance comparison — `make compare-rgba` |
+| [RACING_LINE_OPTIMIZATION](design/RACING_LINE_OPTIMIZATION.md) | The learned racing line: how the per-node lateral offsets are found and consumed |
+| [VALIDATION_SCHEMA](design/VALIDATION_SCHEMA.md) | The `run.json` / `suite.json` contract the validation pipeline emits |
 
 There are no retained historical notes at present.
 

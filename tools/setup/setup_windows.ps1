@@ -59,7 +59,12 @@ $requiredPackages = @(
     'mingw-w64-ucrt-x86_64-clang-tools-extra',
     'mingw-w64-ucrt-x86_64-cppcheck',
     'mingw-w64-ucrt-x86_64-gcovr',
-    'make'
+    'mingw-w64-ucrt-x86_64-python',
+    'make',
+    # Windows git is not visible from inside MSYS2. Without git here the Makefile stamps
+    # every build DRIFTY_BUILD_COMMIT="unknown" / DIRTY="dirty", so failure bundles record
+    # no usable provenance, and `make tidy-changed` cannot tell which files changed.
+    'git'
 )
 
 Write-Info "Using MSYS2 at $Msys2Root"

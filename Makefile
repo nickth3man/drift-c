@@ -509,8 +509,18 @@ tidy-changed:
 ifeq ($(CLANG_TIDY),)
 	$(call skip,tidy-changed: clang-tidy not installed.)
 else
+	@command -v git >/dev/null 2>&1 || { \
+	    echo "tidy-changed: git not on PATH — cannot tell which files changed." >&2; \
+	    echo "  MSYS2 does not ship git by default: pacman -S git" >&2; \
+	    echo "  Refusing to report 'nothing changed', which would be a silent pass." >&2; \
+	    exit 1; \
+	}
 	@base=$${TIDY_BASE:-origin/main}; \
-	changed=$$(git diff --name-only --diff-filter=d "$$base"...HEAD -- 'src/*.c' 'tests/*.c' 'tests/*/*.c' 2>/dev/null || true); \
+	git rev-parse --verify --quiet "$$base" >/dev/null || { \
+	    echo "tidy-changed: '$$base' is not a valid revision (fetch it, or set TIDY_BASE)." >&2; \
+	    exit 1; \
+	}; \
+	changed=$$(git diff --name-only --diff-filter=d "$$base"...HEAD -- 'src/*.c' 'tests/*.c' 'tests/*/*.c'); \
 	files=$$(for f in $$changed; do case " $(ANALYZE_SRCS) " in *" $$f "*) printf '%s ' "$$f";; esac; done); \
 	if [ -z "$$files" ]; then \
 	    echo "tidy-changed: no analysable .c files changed against $$base"; \
