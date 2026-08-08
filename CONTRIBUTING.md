@@ -30,6 +30,10 @@ Then the Python tooling — ruff and pre-commit:
 pip install -r requirements-dev.txt
 ```
 
+Node and npm are needed only by the vehicle appearance inspector (`make inspect`,
+`make visual-diagnose`); nothing else in the toolchain uses them, and the bootstrap script
+does not install them. See [tools/visual/README.md](tools/visual/README.md).
+
 Everything else under `tools/` is deliberately pure-stdlib, so the telemetry and appearance
 checks run on a bare Python. Prefer keeping it that way over adding a dependency.
 

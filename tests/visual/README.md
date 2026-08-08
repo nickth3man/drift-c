@@ -1,5 +1,10 @@
 # Visual regression
 
+> Not the same thing as [`tools/visual/`](../../tools/visual/README.md). This directory is the
+> **gate**: does a rendered game scene still match its committed baseline? That one is the
+> **inspector**: does the appearance grammar produce distinct, correct-looking vehicles across
+> the corpus? Both look at pictures of cars; only this one passes or fails.
+
 `make screenshots` captures the deterministic scenes listed in `src/platform/main.c` and writes them
 to `artifacts/screenshots/`. `make visual-test` compares those against the images in
 `baseline/` with ImageMagick and a small RMSE tolerance, writing difference images to
