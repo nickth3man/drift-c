@@ -245,6 +245,20 @@ DEFAULT_TOLERANCES: Dict[str, Tuple[float, float]] = {
     "low_speed_blend": (0.01, 0.005),
     "_slip_angle_rad": (0.005, 0.005),
     "_slip_ratio": (0.01, 0.005),
+    # The per-wheel slip columns are quantity-first ("slip_angle_front_left_rad"), so they end
+    # in the wheel rather than in the quantity and match neither suffix above. Without these
+    # they would fall through to the 1e-6 default and report ordinary float noise as a breach,
+    # on the same physical quantities the two axle keys above deliberately give slack to. Named
+    # in full rather than by a "_front_left" suffix, which would also capture any future
+    # per-wheel column of an unrelated quantity.
+    "slip_angle_front_left_rad": (0.005, 0.005),
+    "slip_angle_front_right_rad": (0.005, 0.005),
+    "slip_angle_rear_left_rad": (0.005, 0.005),
+    "slip_angle_rear_right_rad": (0.005, 0.005),
+    "slip_ratio_front_left": (0.01, 0.005),
+    "slip_ratio_front_right": (0.01, 0.005),
+    "slip_ratio_rear_left": (0.01, 0.005),
+    "slip_ratio_rear_right": (0.01, 0.005),
     "_wheel_omega_rad_s": (0.5, 0.005),
     "_normal_load_n": (25.0, 0.005),
     "_friction_usage": (0.01, 0.005),
