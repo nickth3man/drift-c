@@ -1053,6 +1053,7 @@ static void scenario_lap_target_results(void)
           "reaching RESULTS_TARGET_LAPS transitions STATE_PLAYING -> STATE_RESULTS live, "
           "not by a hand-set game->state (got %d)",
           (int)game->state);
+    track_free(&game->track);
     free(game);
 }
 
