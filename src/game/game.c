@@ -135,6 +135,7 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     }
 
     game->dev.cameraZoomOverride = config->cameraZoomOverride;
+    game->targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
 
     if (config->track != GAME_TRACK_KEEP) return game_spawn_on_track(game);
     return true;
@@ -253,6 +254,7 @@ GAME_API void game_init(Game *game)
     game->reloadCount = 0;
     game->reloadFlashTimerS = 0.0f;
     game->crashLockoutTimerS = 0.0f;
+    game->targetLaps = RESULTS_TARGET_LAPS;
     particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
     game->camera = (Camera2D){ .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
@@ -420,9 +422,9 @@ GAME_API void game_fixed_update(Game *game, float dt)
                      game->spec.engineRedlineRpm, game->derived.physicallySliding,
                      game->derived.speedMps, dt);
 
-        /* Results trigger: when the target lap count is reached, transition to
+        /* Results trigger: when the run's target lap count is reached, transition to
          * STATE_RESULTS. The car is no longer simulated after this tick. */
-        if (game->track.lap >= RESULTS_TARGET_LAPS) {
+        if (game->track.lap >= game->targetLaps) {
             game->state = STATE_RESULTS;
         }
 

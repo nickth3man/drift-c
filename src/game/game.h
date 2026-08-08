@@ -58,6 +58,11 @@ typedef enum {
 struct GameRunConfig {
     GameTrackId track;
     float cameraZoomOverride; /* 0 leaves the follow camera's own choice alone */
+    /* Laps to complete before the run ends and the car stops being simulated. 0 means the
+     * gameplay default, RESULTS_TARGET_LAPS. This is a run property rather than a constant
+     * because a validation run and a race are not the same length: a validation run wants an
+     * out-lap it can throw away plus enough timed laps to average, and a race wants a race. */
+    int targetLaps;
 };
 
 typedef struct {
@@ -103,6 +108,11 @@ struct Game {
      * scenario in tests/scenarios/core_tests.c asserts that by running the same timeline at two
      * different scales and comparing checksums. */
     float renderPixelsPerMeter;
+
+    /* Laps this run ends after. Set by game_configure_run() from GameRunConfig.targetLaps and
+     * defaulted to RESULTS_TARGET_LAPS by game_init(), so a caller that never configures a run
+     * gets exactly the behaviour the constant always gave. */
+    int targetLaps;
 
     /* Presentation and diagnostics. */
     float crashLockoutTimerS; /* seconds remaining in the post-impact lockout */

@@ -17,10 +17,29 @@
 
 #include "game/telemetry.h"
 
+/* Timed laps a validation run records after its out-lap. Three rather than one because a single
+ * lap is a poor instrument: the same driver and car will vary by more than a second between laps
+ * as small differences at one corner propagate through the next, so a claim about pace has to
+ * rest on a mean, not on whichever lap happened to be measured. */
+#define VALIDATION_TIMED_LAPS 3
+
+/* Laps a validation run drives in total: the out-lap plus the timed ones. Derived rather than
+ * written down twice, because a run that stopped one lap short of what the metrics expect would
+ * report a zero for a lap nobody noticed was missing. */
+#define VALIDATION_RUN_LAPS (1 + VALIDATION_TIMED_LAPS)
+
 typedef struct {
-    /* Lap timing, in seconds. Zero until the run reaches that phase. */
+    /* Lap timing, in seconds. Zero until the run reaches that phase.
+     *
+     * timedLapTimeS is the FIRST timed lap, kept under its original name and meaning so an
+     * older run.json stays comparable with a newer one. The array holds every timed lap, and
+     * best/mean are over the ones actually completed (timedLapsCompleted of them). */
     double outLapTimeS;
     double timedLapTimeS;
+    double timedLapTimesS[VALIDATION_TIMED_LAPS];
+    double bestTimedLapTimeS;
+    double meanTimedLapTimeS;
+    int timedLapsCompleted;
 
     /* Speed, m/s, over the whole run. minMoving ignores ticks below MIN_MOVING_SPEED_MPS so a
      * stationary start does not pin the minimum at zero. */

@@ -808,7 +808,7 @@ clean-artifacts:
 	rm -rf $(TELEMETRY) $(ARTIFACTS)/replays $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots \
 	       $(ARTIFACTS)/visual $(ARTIFACTS)/visual-diff $(ARTIFACTS)/corpus-cards \
 	       $(ARTIFACTS)/gallery-ingame $(ARTIFACTS)/recordings $(ARTIFACTS)/video \
-	       $(ARTIFACTS)/car_visual_failures $(ARTIFACTS)/racing_line $(ARTIFACTS)/validation; \
+	       $(ARTIFACTS)/car_visual_failures $(ARTIFACTS)/validation; \
 	rm -f $(ARTIFACTS)/*.html $(ARTIFACTS)/*.md $(ARTIFACTS)/*.xml; \
 	after=$$(du -sm $(ARTIFACTS) 2>/dev/null | cut -f1 || echo 0); \
 	echo "clean-artifacts: kept $$(ls -1d $(ARTIFACTS)/failure-* 2>/dev/null | grep -c . || echo 0) of $$total failure bundle(s); $${before} MB -> $${after} MB"

@@ -90,9 +90,13 @@ void validation_metrics_compute(const TelemetryRow *rows, int count, ValidationM
     float prevLockout = 0.0f;
 
     /* Lap timing comes from lap-completing events recorded in checkpoint_event (== 3). The
-     * first is the out-lap finish, the second the timed lap finish. */
+     * first is the out-lap finish; every one after it closes a timed lap, measured from the
+     * previous lap's finish rather than from the start of the run. */
     double outLapTime = 0.0;
     double timedLapTime = 0.0;
+    double timedLapTimes[VALIDATION_TIMED_LAPS] = { 0.0 };
+    double lastLapEndS = 0.0;
+    int timedLapsCompleted = 0;
     int lapCompletesSeen = 0;
 
     for (int i = 0; i < count; i++) {
@@ -125,10 +129,17 @@ void validation_metrics_compute(const TelemetryRow *rows, int count, ValidationM
         if (ev == 2) outOfOrder++;
         if (ev == 3) {
             lapCompletesSeen++;
-            if (lapCompletesSeen == 1)
+            if (lapCompletesSeen == 1) {
                 outLapTime = r->timeS;
-            else if (lapCompletesSeen == 2)
-                timedLapTime = r->timeS - outLapTime;
+                lastLapEndS = r->timeS;
+            } else {
+                const int timedIndex = lapCompletesSeen - 2;
+                if (timedIndex < VALIDATION_TIMED_LAPS) {
+                    timedLapTimes[timedIndex] = r->timeS - lastLapEndS;
+                    timedLapsCompleted = timedIndex + 1;
+                }
+                lastLapEndS = r->timeS;
+            }
         }
 
         /* Spin interval: large sideslip while moving. */
@@ -172,8 +183,21 @@ void validation_metrics_compute(const TelemetryRow *rows, int count, ValidationM
         qsort(speeds, (size_t)speedSamples, sizeof(double), cmp_double);
     }
 
+    double bestTimed = 0.0;
+    double timedSum = 0.0;
+    for (int i = 0; i < timedLapsCompleted; i++) {
+        timedSum += timedLapTimes[i];
+        if (bestTimed == 0.0 || timedLapTimes[i] < bestTimed) bestTimed = timedLapTimes[i];
+    }
+    timedLapTime = (timedLapsCompleted > 0) ? timedLapTimes[0] : 0.0;
+
     out->outLapTimeS = outLapTime;
     out->timedLapTimeS = timedLapTime;
+    for (int i = 0; i < VALIDATION_TIMED_LAPS; i++) out->timedLapTimesS[i] = timedLapTimes[i];
+    out->bestTimedLapTimeS = bestTimed;
+    out->meanTimedLapTimeS =
+        (timedLapsCompleted > 0) ? timedSum / (double)timedLapsCompleted : 0.0;
+    out->timedLapsCompleted = timedLapsCompleted;
     out->maxSpeedMps = (maxSpeed == -INFINITY) ? 0.0 : maxSpeed;
     out->meanSpeedMps = speedSum / (double)count;
     out->medianSpeedMps =

@@ -321,6 +321,42 @@ static void scenario_run_report(void)
     check(m.outOfOrderEvents == 0, "no out-of-order crossings (got %d)", m.outOfOrderEvents);
     /* Out-lap completes at row 5 (the only lap-complete event). */
     check_near(m.outLapTimeS, 0.5, 1e-6, "out-lap time is 0.5 s");
+    /* And nothing after it, so every timed-lap field stays at its zero. */
+    check(m.timedLapsCompleted == 0, "no timed laps completed (got %d)", m.timedLapsCompleted);
+    check_near(m.timedLapTimeS, 0.0, 1e-6, "no first timed lap time");
+    check_near(m.bestTimedLapTimeS, 0.0, 1e-6, "no best timed lap time");
+    check_near(m.meanTimedLapTimeS, 0.0, 1e-6, "no mean timed lap time");
+
+    /* Three timed laps, measured from the previous lap's finish rather than from the start of
+     * the run. Lap completions at t = 0.5, 1.2, 1.8 and 2.6 s make the out-lap 0.5 s and the
+     * timed laps 0.7, 0.6 and 0.8 s — deliberately unequal, because summing to a mean is the
+     * only thing that separates a working per-lap delta from one that reports total elapsed. */
+    {
+        TelemetryRow laps[27];
+        memset(laps, 0, sizeof(laps));
+        for (int i = 0; i < 27; i++) {
+            laps[i].timeS = (float)(i + 1) * 0.1f;
+            laps[i].speedMps = 20.0f;
+            laps[i].onTrack = 1;
+        }
+        laps[4].checkpointEvent = 3;  /* t = 0.5 — out-lap done */
+        laps[11].checkpointEvent = 3; /* t = 1.2 — timed lap 1: 0.7 s */
+        laps[17].checkpointEvent = 3; /* t = 1.8 — timed lap 2: 0.6 s */
+        laps[25].checkpointEvent = 3; /* t = 2.6 — timed lap 3: 0.8 s */
+
+        ValidationMetrics lm;
+        validation_metrics_compute(laps, 27, &lm);
+
+        check(lm.timedLapsCompleted == 3, "three timed laps completed (got %d)",
+              lm.timedLapsCompleted);
+        check_near(lm.outLapTimeS, 0.5, 1e-5, "out-lap is 0.5 s");
+        check_near(lm.timedLapTimesS[0], 0.7, 1e-5, "timed lap 1 is 0.7 s");
+        check_near(lm.timedLapTimesS[1], 0.6, 1e-5, "timed lap 2 is 0.6 s");
+        check_near(lm.timedLapTimesS[2], 0.8, 1e-5, "timed lap 3 is 0.8 s");
+        check_near(lm.timedLapTimeS, 0.7, 1e-5, "timed_lap_time_s still means the first one");
+        check_near(lm.bestTimedLapTimeS, 0.6, 1e-5, "best timed lap is 0.6 s");
+        check_near(lm.meanTimedLapTimeS, 2.1 / 3.0, 1e-5, "mean timed lap is 0.7 s");
+    }
 
     /* Empty input is safe. */
     ValidationMetrics zero;

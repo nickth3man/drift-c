@@ -355,7 +355,7 @@ tests/visual/                             deterministic scene baselines and the 
 tools/setup/                              MSYS2 UCRT64 bootstrap, hot-reload validation
 tools/build/                              compile_commands.json generation
 tools/telemetry/                          telemetry comparison, plots, summaries, HTML reports
-tools/validation/                         suite runner, run diffing, racing-line optimiser
+tools/validation/                         suite runner, run diffing
 tools/appearance/                         RGBA regression and sprite rotation measurement
 tools/recording/                          gameplay capture
 tools/visual/                             browser appearance inspector and its Playwright measurements

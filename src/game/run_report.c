@@ -117,10 +117,19 @@ bool run_report_write(const char *path, const RunReportInput *in)
 
     fprintf(file,
             "  \"lap\": { \"out_lap_time_s\": %.6f, \"timed_lap_time_s\": %.6f, "
+            "\"timed_lap_times_s\": [",
+            m != NULL ? m->outLapTimeS : 0.0, m != NULL ? m->timedLapTimeS : 0.0);
+    for (int i = 0; i < VALIDATION_TIMED_LAPS; i++) {
+        fprintf(file, "%s%.6f", (i > 0) ? ", " : "", m != NULL ? m->timedLapTimesS[i] : 0.0);
+    }
+    fprintf(file,
+            "], \"timed_laps_completed\": %d, \"best_timed_lap_time_s\": %.6f, "
+            "\"mean_timed_lap_time_s\": %.6f, "
             "\"checkpoints_passed\": %d, \"checkpoints_missed\": %d, \"out_of_order_events\": "
             "%d },\n",
-            m != NULL ? m->outLapTimeS : 0.0, m != NULL ? m->timedLapTimeS : 0.0,
-            in->checkpointsPassed, in->checkpointsMissed, in->outOfOrderEvents);
+            m != NULL ? m->timedLapsCompleted : 0, m != NULL ? m->bestTimedLapTimeS : 0.0,
+            m != NULL ? m->meanTimedLapTimeS : 0.0, in->checkpointsPassed,
+            in->checkpointsMissed, in->outOfOrderEvents);
 
     if (m != NULL) {
         fprintf(file, "  \"metrics\": {\n");

@@ -42,9 +42,6 @@ typedef struct {
      * the barrier stands on the track edge. Deliberately LAST in the struct so the existing
      * positional initialisers `{ {x,y}, hw, surface }` keep meaning what they always did. */
     float runoffHalfWidthM;
-    /* Learned target path. Authored loaders populate it from centerM before applying an
-     * optimized racing line; legacy positional initialisers leave it at zero. */
-    Vector2 racingLineM;
 } TrackNode;
 
 typedef struct {

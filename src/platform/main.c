@@ -565,6 +565,7 @@ static int run_validate_lap(Game *game, const Options *options)
     GameRunConfig runConfig;
     memset(&runConfig, 0, sizeof(runConfig));
     runConfig.track = GAME_TRACK_CHICANE;
+    runConfig.targetLaps = VALIDATION_RUN_LAPS;
     if (options->track != NULL) {
         if (strcmp(options->track, "sprint") == 0) {
             runConfig.track = GAME_TRACK_SPRINT;
@@ -592,7 +593,7 @@ static int run_validate_lap(Game *game, const Options *options)
     AiDriverState aiState;
     memset(&aiState, 0, sizeof(aiState));
 
-    const int budgetTicks = 14400; /* 120 s max */
+    const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max, the replay ring's capacity */
     const int maxRows = budgetTicks / VIDEO_TICKS_PER_FRAME;
     TelemetryRow *rowsBuffer = (TelemetryRow *)calloc((size_t)maxRows, sizeof(TelemetryRow));
 
@@ -608,7 +609,8 @@ static int run_validate_lap(Game *game, const Options *options)
 
     replay_begin_recording(&game->replay, game->sim.tick);
 
-    for (int t = 0; t < budgetTicks && game->track.lap < 2 && !writeFailed; t++) {
+    for (int t = 0; t < budgetTicks && game->track.lap < VALIDATION_RUN_LAPS && !writeFailed;
+         t++) {
         ai_driver_update(&aiCfg, &aiState, &game->track, &game->vehicle, &game->derived,
                          &game->spec, &game->input, FIXED_DT_S);
         game_fixed_update(game, FIXED_DT_S);
@@ -718,7 +720,7 @@ static int run_validate_lap(Game *game, const Options *options)
         status = RUN_FAIL_VIDEO_ENCODE_FAILED;
     } else if (outOfOrder > 0) {
         status = RUN_FAIL_CHECKPOINT_OUT_OF_ORDER;
-    } else if (game->track.lap < 2) {
+    } else if (game->track.lap < VALIDATION_RUN_LAPS) {
         status = RUN_FAIL_CHECKPOINT_MISSED;
     } else if (ticksRun >= budgetTicks) {
         status = RUN_FAIL_TICK_BUDGET_EXCEEDED;

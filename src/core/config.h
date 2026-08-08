@@ -56,10 +56,21 @@
  * Deterministic input recording
  * ------------------------------------------------------------------------------------- */
 
-/* Fixed-capacity ring buffer, sized in fixed ticks. 14400 ticks = 120.0 s at 120 Hz.
+/* Fixed-capacity ring buffer, sized in fixed ticks. 36000 ticks = 300.0 s at 120 Hz.
  * Overflow behaviour is a documented ring: the oldest tick is discarded and counted in
- * ReplayBuffer.overwrittenTicks. See src/game/replay.h. */
-#define REPLAY_CAPACITY_TICKS 14400
+ * ReplayBuffer.overwrittenTicks. See src/game/replay.h.
+ *
+ * 300 s rather than the old 120 s because a validation run is now an out-lap plus three timed
+ * laps, and a ring that wrapped mid-run would silently drop the beginning of the very timeline
+ * the run.json claims to be a recording of.
+ *
+ * The size is set by the SLOWEST car on the roster, not the fastest. rwd_grip finishes in 16471
+ * ticks and awd_rally — the loose-surface rally car, which gives up the most grip on asphalt —
+ * takes 24945. Sizing this off a quick car is what makes a slow one look like it failed to
+ * complete the run when all it did was take longer, so the budget carries headroom above the
+ * measured worst case rather than hugging it. The buffer is embedded in Game, so this is a
+ * struct-size change: ~720 KB rather than ~288 KB, on a heap-allocated block. */
+#define REPLAY_CAPACITY_TICKS 36000
 /* -------------------------------------------------------------------------------------
  * Phase 1/2 vehicle physics (SI units)
  * ------------------------------------------------------------------------------------- */

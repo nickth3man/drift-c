@@ -23,6 +23,11 @@ import sys
 import time
 from typing import Any, Dict, List
 
+# Laps each case drives: an out-lap plus three timed ones. Must match VALIDATION_RUN_LAPS in
+# src/game/validation_metrics.h — the C side decides how many laps are driven, this side only
+# checks that the report proves they all happened.
+RUN_LAPS = 4
+
 
 def get_commit(repo_root: str) -> str:
     try:
@@ -183,11 +188,14 @@ def main(argv: List[str] | None = None) -> int:
         )
         status = run_data.get("result", {}).get("status", "FAIL")
         reason = run_data.get("result", {}).get("failure_reason")
-        timed_time = run_data.get("lap", {}).get("timed_lap_time_s", 0.0)
-        # A process-level PASS is not enough: assert the report proves two complete laps from
-        # this scenario's start gate, preventing a partial first/second lap from being counted.
+        lap_data = run_data.get("lap", {})
+        timed_time = lap_data.get("timed_lap_time_s", 0.0)
+        best_time = lap_data.get("best_timed_lap_time_s", 0.0)
+        mean_time = lap_data.get("mean_timed_lap_time_s", 0.0)
+        # A process-level PASS is not enough: assert the report proves every lap of the run was
+        # completed from this scenario's start gate, preventing a partial lap from being counted.
         track_data = run_data.get("track", {})
-        expected_crossings = 2 * int(track_data.get("checkpoint_count", 0))
+        expected_crossings = RUN_LAPS * int(track_data.get("checkpoint_count", 0))
         actual_crossings = int(run_data.get("lap", {}).get("checkpoints_passed", 0))
         if status == "PASS" and (
             actual_crossings != expected_crossings
@@ -198,7 +206,7 @@ def main(argv: List[str] | None = None) -> int:
 
         if status == "PASS":
             passed_count += 1
-            print(f"     PASS (timed lap: {timed_time:.3f} s)")
+            print(f"     PASS (best {best_time:.3f} s, mean {mean_time:.3f} s over {RUN_LAPS - 1} timed laps)")
         else:
             failed_count += 1
             print(f"     FAIL ({reason})")
@@ -212,6 +220,8 @@ def main(argv: List[str] | None = None) -> int:
                 "status": status,
                 "failure_reason": reason,
                 "timed_lap_time_s": timed_time,
+                "best_timed_lap_time_s": best_time,
+                "mean_timed_lap_time_s": mean_time,
                 "run_json": f"{case_id}/{car_id}/run.json",
                 "full_data": run_data,
             }
@@ -234,6 +244,8 @@ def main(argv: List[str] | None = None) -> int:
                 "status": r["status"],
                 "failure_reason": r["failure_reason"],
                 "timed_lap_time_s": r["timed_lap_time_s"],
+                "best_timed_lap_time_s": r["best_timed_lap_time_s"],
+                "mean_timed_lap_time_s": r["mean_timed_lap_time_s"],
                 "run_json": r["run_json"],
             }
             for r in results
