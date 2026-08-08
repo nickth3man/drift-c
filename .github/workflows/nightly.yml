@@ -1,0 +1,74 @@
+# Slow or noisy checks run on a schedule and on demand. The job is deliberately
+# non-blocking: it records findings and uploads evidence without holding up pull requests.
+
+name: Nightly quality
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Full-tree quality and fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang clang-format clang-tidy cppcheck gcovr
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Fetch raylib headers
+        run: |
+          RAYLIB_SHA=dbc56a87da87d973a9c5baa4e7438a9d20121d28  # tag 6.0
+          git init -q third_party/raylib-src
+          git -C third_party/raylib-src fetch -q --depth 1 \
+            https://github.com/raysan5/raylib "$RAYLIB_SHA"
+          git -C third_party/raylib-src checkout -q FETCH_HEAD
+
+      - name: Cppcheck all checks
+        continue-on-error: true
+        run: |
+          cppcheck --quiet --error-exitcode=1 --std=c11 --language=c \
+            --enable=all --inline-suppr --suppress=missingIncludeSystem \
+            --suppress='*:third_party/*' \
+            -I src -I third_party/raygui -I third_party/raylib-src/src \
+            src tests
+
+      - name: Full-tree clang-tidy
+        continue-on-error: true
+        run: make DRIFTY_STRICT=1 tidy
+
+      - name: Coverage
+        continue-on-error: true
+        run: make DRIFTY_STRICT=1 coverage
+
+      - name: Fuzz targets
+        continue-on-error: true
+        run: make DRIFTY_STRICT=1 FUZZ_SECONDS=180 fuzz
+
+      - name: Sanitizers
+        continue-on-error: true
+        run: make DRIFTY_STRICT=1 sanitize
+
+      - name: Upload nightly evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-quality-evidence
+          path: |
+            artifacts/
+            build/coverage/cobertura.xml
+            build/tidy.log
+            build/analyze.log
+          retention-days: 14
+          if-no-files-found: ignore

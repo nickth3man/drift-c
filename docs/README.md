@@ -4,8 +4,8 @@ Two directories, split by whether a document tells you how the code behaves **no
 
 - **[design/](design/)** — current contracts. If one of these disagrees with the code, that is
   a bug in one of them, and worth resolving rather than ignoring.
-- **[notes/](notes/)** — historical: evaluations, surveys, and investigations, each dated and
-  carrying a header saying what is stale about it. Useful for *why*, not for *what is true*.
+Historical evaluations and investigations are not part of the current contract; delete or date
+them before adding them under `notes/`.
 
 Start elsewhere for the basics: [README](../README.md) for what Drifty is and how to build it,
 [CONTRIBUTING](../CONTRIBUTING.md) for setup and what must be green before pushing, and
@@ -21,12 +21,7 @@ Start elsewhere for the basics: [README](../README.md) for what Drifty is and ho
 | [CAR_SPRITE_ROTATION_STABILITY](design/CAR_SPRITE_ROTATION_STABILITY.md) | Measuring point-sampled rotation stability — `make measure-rotation` |
 | [CAR_VISUAL_RGBA_REGRESSION](design/CAR_VISUAL_RGBA_REGRESSION.md) | Pixel-level appearance comparison — `make compare-rgba` |
 
-## notes/
-
-| Document | Why it is here |
-| --- | --- |
-| [ADVERSARIAL_CRITIQUE](notes/ADVERSARIAL_CRITIQUE.md) | Phase 2 evaluation, 6 Aug 2026. Ratings are stale; §5 still lists open fixes |
-| [GAME_INTERACTION_RECORDING_AND_REVIEW](notes/GAME_INTERACTION_RECORDING_AND_REVIEW.md) | Survey of five recording designs. System 3 became `make record`; the rest were not adopted |
+There are no retained historical notes at present.
 
 ## Adding a document
 

@@ -1,638 +1,290 @@
-# Drifty → Racing: Milestone 1 (Automated Chicane Lap Validation)
+# Closing the Drifty project-setup gaps
 
 ## Context
 
-Drifty is a top-down 2D driving simulator in C11 + raylib 6.0 (Windows / MSYS2 UCRT64, ~29k LOC). Its
-vehicle model is already sim-cade: a planar rigid body with four wheels, longitudinal *and* lateral load
-transfer, normalized Pacejka-form tire curves under a per-wheel friction ellipse, slip ratio, tire
-relaxation length, load sensitivity, LOCKED/OPEN/LSD differentials, Ackermann, aero drag, per-wheel
-rolling resistance, and a four-surface friction table.
+An assessment of `drift-c` against comparable C/raylib projects (`raysan5/raylib-game-template`, the
+hot-reload templates) and serious C codebases (neovim, DevilutionX, aseprite, curl) found that the
+**code and build system are above peer median** — the `SOURCE_GROUP_NAMES` manifest in
+[Makefile](Makefile), the telemetry-baseline regression harness, the fuzz targets, and the `src/`
+subsystem layout are all better engineered than the raylib ecosystem norm. Dead code in `src/` is
+essentially nil (5 of 251 header-declared functions unreferenced, 4 of them legitimate Tracy stubs).
 
-The drift focus does **not** live in the force model. It lives in `scoring.c`, in the score HUD, in the
-camera zoom, and in the smoke spawn — all of which are asserted (by the `scoring-determinism` scenario)
-to never feed back into forces. So this is a pivot of the *gameplay layer*, not a physics rewrite. There
-is no anti-drift assist to remove, and none will be added: power oversteer, throttle-induced rotation,
-and handbrake slides remain available to any car whose grip, power and drivetrain allow them.
+The gaps are all at the **perimeter**: nothing is enforced, nothing is licensed, and 40% of the tool
+surface (Python, Node) has no linting, formatting, or declared dependencies. Ten gaps were found:
 
-The goal of Milestone 1 is narrow and deliberately mechanical: a chicane test track with an ordered
-checkpoint system, an AI driver that can only touch the same `Input` struct a human touches, and a
-repeatable pipeline that produces, per car, an MP4 + a telemetry CSV + a run JSON with an explicit
-pass/fail. That pipeline is the instrument every later handling change is measured with, so it is built
-first.
+1. No CI — `.github/` has templates, zero workflows; `make ci` prints `SKIP` and exits 0
+2. No LICENSE — all-rights-reserved despite vendoring zlib/MIT third-party code
+3. Root clutter — 4 build entry points, byte-identical `CLAUDE.md`/`AGENTS.md`, editor debris
+4. ~1.35 GB of unreaped run evidence in the working tree
+5. `scripts/` vs `tools/` incoherent — 5 of 9 entries orphaned
+6. Python: 3,671 lines, zero config, undeclared `numpy`/`PIL` deps
+7. No clang-tidy
+8. No `.editorconfig`, no pre-commit, no CONTRIBUTING/CHANGELOG
+9. `docs/` — 9 files, all orphaned from the README, live specs mixed with dead proposals
+10. Visual testing split across `tests/visual/` and `tools/visual/` with no cross-reference
 
----
+**Outcome:** every check that exists today runs automatically and fails loudly; every tool is
+invocable from the build; the working tree is navigable; the repo is legally forkable.
 
-## Decisions taken (from the interview)
+**Decisions made:** MIT license · CI on Windows UCRT64 + Linux · delete dead code and stale docs ·
+deliver as three tiered PRs.
 
-| Question | Decision |
-|---|---|
-| Playable car set | New explicit **6-car roster**, 2 per drivetrain layout (RWD/FWD/AWD), C table, pipeline-only. No in-game car select in M1. |
-| Video capture | **Deterministic offline render** — exact `FIXED_DT_S` stepping, raw frames piped to ffmpeg. No wall clock, no key injection. |
-| AI controls | **Steer + throttle + brake only**, with the existing automatic transmission enabled. No handbrake, no manual shift. |
-| FWD/AWD | **Implement physically in M1.** `drivetrainLayout` / `frontTorqueSplit` become real. |
-| Track authoring | **C-authored ribbon centerline + explicit ordered checkpoint array**, versioned. |
-| Drift scoring | **Remove entirely**, including the `scoringDrift` classifier. Spin detection rebuilt in the metrics layer. |
-| Lap structure | **Out-lap + 1 timed lap.** |
-| Telemetry rate | **60 Hz** (every 2nd tick). Simulation stays at **120 Hz**. Video at 60 fps ⇒ CSV row *N* ≡ video frame *N*. |
-| Orchestrator | **C subcommand `--validate-lap`** does one run end to end; **Python** aggregates the suite and diffs against previous runs. |
-| Run termination | Abort only on **hard tick budget** or **stall**. Out-of-order/missed checkpoints and off-track excursions are **recorded, not aborted** (a missed required checkpoint still means FAIL). |
+## Guardrails — explicitly not doing
 
-**Not in Milestone 1:** AI opponents, championships, progression, multiplayer, additional tracks, race
-modes, in-game car selection, vsync/display-rate work.
-
----
-
-## Assessment of existing systems
-
-### Verified by inspection
-
-| System | Where | Disposition |
-|---|---|---|
-| Fixed 120 Hz timestep, substep cap, interpolation alpha | `src/platform/timestep.c`, `main.c` | **Keep as-is** |
-| Hot-reload platform/module split, `Game` block ownership | `src/platform/`, `src/game/game.h` | **Keep as-is** |
-| `Input` struct: 4 held controls + 6 one-shots, raylib-free | `src/game/input.h` | **Keep as-is** — this is the AI's only interface |
-| Deterministic replay buffer (fixed-tick `Input` timeline) | `src/game/replay.c` | **Keep as-is** — records AI input for free |
-| Tire curves, friction ellipse, slip ratio, relaxation | `src/physics/tire.c` | **Keep as-is** |
-| Load transfer (long. + lat.), aero drag, rolling resistance | `src/physics/physics.c` | **Keep as-is** |
-| Surface friction table (asphalt/gravel/grass/snow) | `src/physics/surface.c` | **Keep as-is** |
-| Swept capsule collision vs. track barriers | `src/world/collision.c` | **Reuse with modification** (runoff-edge barriers) |
-| Automatic transmission | `src/physics/auto_transmission.c` | **Keep as-is** — the AI relies on it |
-| CSV telemetry writer + single `Game`→row projection | `src/game/telemetry.c`, `tests/support/simulation_fixture.c` | **Reuse with modification** (append columns) |
-| Scripted-scenario harness pattern | `run_scripted_scenario()` in `tests/scenarios/handling_tests.c` | **Reuse** as the template for the validation run loop |
-| Deterministic screenshot capture (`--capture-scene`) | `src/platform/main.c` | **Reuse with modification** → per-frame video |
-| Failure bundles (replay + spec + telemetry + checksum) | `src/dev/failure_bundle.c` | **Keep as-is** — reuse for failed runs |
-| Telemetry comparison / report tooling | `tools/telemetry/*.py`, `tests/baselines/`, `mk regression` | **Keep as-is** |
-| Parameter registry (123 tunables, one definition each) | `src/dev/dev_params.c` | **Keep as-is** |
-| `dev_presets.c` (10 hand-tuned driving profiles) | `src/dev/dev_presets.c` | **Keep** — seed values for the new roster |
-| `car_corpus.c` (100-vehicle appearance fleet) | `src/dev/car_corpus.c` | **Keep as-is** — appearance workstream, not the roster |
-| Drift scoring, combo, high-score persistence | `src/game/scoring.c`, `Game.driftScore` etc. | **Remove** |
-| `derived.scoringDrift` classifier | `src/physics/physics.c:1010`, `scoring.c` | **Remove** |
-| Score HUD card, DRIFT! callout, drift camera zoom | `src/render/render_hud.c`, `render.c` | **Remove** |
-| Parking-lot "track" (400×300 m empty rectangle) | `src/world/track.c` | **Refactor substantially** |
-| Implicit per-node checkpoint gates | `track_update_checkpoints()` | **Replace** with explicit ordered checkpoints |
-| AI driver | — | **Missing — build** |
-| Video capture | — | **Missing — build** |
-| Run-level JSON metadata / summary metrics | — | **Missing — build** |
-| Car roster / enumeration | — | **Missing — build** |
-
-### Confirmed gaps that change the work
-
-1. **Drive torque is hardcoded RWD.** `drivetrain_calculate_torques()` (`src/physics/drivetrain.c:154`)
-   writes drive torque only to `WHEEL_REAR_LEFT/RIGHT`. `drivetrainLayout` and `frontTorqueSplit` are
-   registered parameters (`dev_params.c:299`) consumed **only by the appearance grammar**. FWD and AWD
-   are currently cosmetic. → Phase 2.
-2. **No downforce.** `aeroLiftCoefFront/Rear`, `aeroRefArea*` feed appearance only. → deferred to M2;
-   noted so no one assumes it works.
-3. **Track surface edge and barrier are the same line.** `Track_SurfaceAt()` and
-   `collision_resolve_track()` both use `TrackNode.halfWidthM`, so leaving the racing surface *is*
-   hitting the wall. Off-track excursions are therefore unmeasurable today. → Phase 1 adds a runoff band.
-4. **`track_update_checkpoints()` only tests the *next* gate**, so an out-of-order crossing is invisible
-   — it simply doesn't advance. Recording out-of-order events requires testing all gates. → Phase 1.
-5. **`track_init()` is `#if !defined(DRIFTY_HEADLESS)`-gated inside `game_init()`.** `track.c` and
-   `collision.c` *are* in the headless link closure (`GAME_SRCS`), so this is a wiring change, not a
-   build change. Leaving `game_init()` alone and having the validation path load the track explicitly
-   keeps all 8 committed CSV baselines untouched.
-6. **Steering speed-sensitivity is disabled** (`STEER_SPEED_MIN_FACTOR` = 1.0). Left alone in M1 — it is
-   a handling decision, and the pipeline exists precisely to evaluate it afterwards.
-
-### Reload-safety constraint (easy to violate here)
-
-`Track` lives inside `Game`. `game.h` and `hotreload.h` forbid any pointer into module code or static
-data from anything reachable from `Game`. **Track/car identifier strings must be fixed `char[N]` arrays,
-never `const char *`.** Heap arrays are fine — `Track.nodes` already is one.
-
-### Unknowns / assumptions stated
-
-- Validation runs on a GPU-capable Windows desktop (raylib needs a GL context). Assumed; `mk validate`
-  is deliberately *not* added to the headless `verify` target.
-- The uncommitted working-tree changes (dev_scenario +264, handling_tests +254, telemetry schema
-  additions, `REPLAY_CAPACITY_TICKS` 7200→14400, parking lot 200×150→400×300) are assumed to land
-  before this work starts. The 14400-tick replay capacity (120 s) is in fact required by Phase 4 —
-  an out-lap + timed lap exceeds 60 s.
+- **No CMake migration.** The hot-reload link sequence, 7 output configurations, and Tracy build are
+  things CMake makes harder, and the source manifest already solves the duplication CMake would be
+  brought in for.
+- **No test-framework replacement.** 12.8k lines of scenario tests stay on the bespoke runner.
+- **No `src/` reorganization.** The layout is already correct.
+- **No `tools/telemetry/` packaging refactor.** The `sys.path` + `# noqa: E402` idiom is correct for
+  scripts invoked by path; converting to a package would churn the Makefile for no behavior change.
 
 ---
 
-## Proposed pipeline architecture
+## PR 1 — Enforcement and hygiene
 
-```
-tools/validation/run_suite.py            ← orchestration, suite aggregation, regression diff
-        │ invokes once per car
-        ▼
-drifty.exe --validate-lap --car ID --out DIR        (one deterministic process)
-        │
-        ├── car_roster.c ──────────► VehicleSpec          (enumeration + configuration)
-        ├── track.c (chicane_v1) ──► Track + Checkpoint[] (scene load + start pose)
-        │
-        └── fixed-tick loop @120 Hz
-                ├── ai_driver.c ────► Input               ← writes ONLY Input; everything else const
-                ├── game_fixed_update()                   ← unchanged path: auto-trans, physics,
-                │        │                                    checkpoints, collision
-                │        └── replay_record(Input)         ← AI run is replayable for free
-                ├── every 2nd tick (60 Hz):
-                │        ├── telemetry_write_row()  ──────► telemetry.csv
-                │        └── render + LoadImageFromScreen ─► ffmpeg stdin ─► run.mp4
-                └── on completion:
-                         ├── validation_metrics.c  ───────► summary metrics
-                         └── run_report.c          ───────► run.json  (PASS/FAIL + reason)
+Closes gaps 1, 2, 6, 8. Nothing here changes program behavior.
+
+### 1.1 `LICENSE` (MIT)
+
+Standard MIT text, `Copyright (c) 2026 Nicolas Alexander`. Add a **Third-party** section to
+[README.md](README.md) pointing at [third_party/README.md](third_party/README.md), which already
+carries exemplary provenance records (upstream URL, sha256, license) for raygui (zlib) and
+stb_image_write (public domain / MIT). Do not restate the licenses — link them.
+
+### 1.2 Make `SKIP` fail in CI — the prerequisite for every other check
+
+`format-check`, `lint`, `analyze`, `sanitize`, `coverage`, `fuzz`, and the ImageMagick-gated
+`screenshots`/`visual-test` targets all print `SKIP` and **exit 0** when a tool is missing.
+[Makefile:595](Makefile) `ci:` therefore can pass having run almost nothing.
+
+Add one helper near the optional-tool block (`Makefile` ~line 95, beside `CLANG`/`CPPCHECK`/`GCOVR`/`MAGICK`):
+
+```make
+# A missing tool is advisory locally and fatal in CI, so `make ci` cannot pass by skipping.
+ifdef DRIFTY_STRICT
+skip = @echo "MISSING $(1)" >&2; exit 1
+else
+skip = @echo "SKIP $(1)" >&2
+endif
 ```
 
-The audit boundary is the `ai_driver_update()` signature: every argument except `Input *out` is `const`.
-The compiler, not a convention, prevents the AI from touching a transform, a velocity, or a wheel state.
+Replace each `@echo "SKIP ..."` line with `$(call skip,...)`. Keep the existing install-hint text —
+it is good. The UCRT64 ASan/UBSan-runtime probe inside `sanitize:` ([Makefile:414](Makefile)) keeps
+its own SKIP unconditionally: that is a documented platform limitation, not a missing tool, and CI
+covers sanitizers on the Linux job instead.
 
----
+### 1.3 `.github/workflows/ci.yml`
 
-## Phase 1 — Chicane track, runoff, and ordered checkpoints
+Two jobs, on push and pull_request. Pin actions by SHA (as curl and crystal-lang do).
 
-**Objective.** A closed chicane circuit with an unambiguous start/finish, an ordered required-checkpoint
-sequence, a runoff band that makes "off track" distinct from "hit the wall", and checkpoint state that
-telemetry can record.
+**`windows-ucrt64`** — the canonical environment, via `msys2/setup-msys2@v2` with `msystem: UCRT64`,
+`pacboy: raylib:p clang:p clang-tools-extra:p cppcheck:p gcovr:p python:p`, `defaults.run.shell: msys2 {0}`.
+Runs `make DRIFTY_STRICT=1 verify` (format-check + lint + analyze + test-physics + regression).
 
-**Files.** `src/world/track.h/.c`, `src/world/collision.c`, `src/game/game.c` (checkpoint call site),
-`tests/scenarios/gameplay_tests.c`.
-
-**Retain.** `TrackNode`, the centerline distance helpers, `segments_intersect()`, the parking-lot mode
-(free-drive and existing tests still use it), the swept-capsule collision algorithm.
-
-**Change.**
-- `TrackNode` gains `float runoffHalfWidthM`. `Track_SurfaceAt()` returns the node surface within
-  `halfWidthM`, a runoff surface (grass) between `halfWidthM` and `runoffHalfWidthM`, and
-  `offTrackSurfaceId` beyond. `collision_resolve_track()` builds barriers at `runoffHalfWidthM`.
-- `track_update_checkpoints()` is rewritten against an explicit `Checkpoint[]` and returns an event:
-  ```c
-  typedef struct { Vector2 centerM, normalUnit; float halfWidthM; bool required; } Checkpoint;
-  typedef struct { bool crossed; int index; bool outOfOrder; bool lapCompleted; float lapTimeS; }
-      TrackCheckpointEvent;
-  ```
-  It tests **every** checkpoint each tick so out-of-order crossings are detectable, and applies the
-  existing forward-only dot-product rule against the checkpoint's own normal.
-- `Track` gains `Checkpoint *checkpoints; int checkpointCount; char id[32]; char version[16];` — fixed
-  char arrays, per the reload-safety constraint.
-- `game.c` records the returned event into the frame's telemetry context instead of discarding a `bool`.
-
-**Create.**
-- `track_load_chicane(Track *)` — a closed loop of roughly 640 m:
-  - main straight ~180 m, half-width 8 m, runoff 12 m, start/finish gate at its midpoint;
-  - a **left-right-left chicane** on that straight: ~25 m lateral offset over ~60 m, half-width 6 m,
-    runoff 8 m — tight enough to require real braking, turn-in and direction change;
-  - two connecting curves (~40 m radius) closing the loop.
-  At an achievable ~23 m/s mean that is ~28 s/lap; out-lap + timed lap ≈ 60 s ≈ 3600 frames at 60 fps.
-  8 required checkpoints: start/finish, chicane entry, both apexes, chicane exit, and one per curve.
-- `track_start_pose(const Track *, Vector2 *posM, float *headingRad)`.
-- `game_spawn_on_track(Game *, const Track *)` — resets the vehicle onto the start pose rather than the
-  world origin.
-- `TRACK_VERSION "chicane_v1"` plus a geometry hash (FNV-1a over the node/checkpoint arrays) so a
-  silent geometry edit is visible in every run JSON.
-
-**Remove/deprecate.** Nothing. The parking lot stays for free-drive.
-
-**Dependencies.** None.
-
-**Risks.**
-- *Ribbon collision at curve joints.* Per-segment straight barriers form a concave polyline on the outer
-  edge; the capsule can catch on a joint and receive a spurious impulse. **Prototype P4 below.**
-- *Half-width choice.* Too tight and the AI fails for track reasons; too wide and the chicane tests
-  nothing. Tune against the AI prototype, not by eye.
-
-**Validation.** Extend `scenario_checkpoint_lap` in `gameplay_tests.c`: ordered traversal advances;
-skipping a required checkpoint does not complete a lap; a reverse crossing does not advance; an
-out-of-order crossing is reported and does not advance; lap wrap resets `nextCheckpoint` and records
-`lastLapTimeS`. New `scenario_track_runoff`: a point inside `halfWidthM` is asphalt, between the two
-widths is grass, beyond `runoffHalfWidthM` is off-track, and a barrier contact occurs only at
-`runoffHalfWidthM`.
-
-**Done when.** `drifty_tests --scenario checkpoint-lap` and `--scenario track-runoff` pass; the chicane
-loads in the running game and is drivable by hand; `mk regression` shows zero baseline diff (nothing in
-this phase touches the default no-track path).
-
----
-
-## Phase 2 — Physical drivetrain layout, and the car roster
-
-**Objective.** `drivetrainLayout` and `frontTorqueSplit` change how the car drives. A 6-car roster spans
-RWD/FWD/AWD and is enumerable by the pipeline.
-
-**Files.** `src/physics/drivetrain.h/.c`, `src/physics/physics.c`, `src/physics/auto_transmission.c`,
-new `src/game/car_roster.h/.c`, `Makefile` (`GAME_SRCS`), `tests/scenarios/physics_tests.c`,
-`tests/test_commands.c` (`--list-cars`, `--generate-roster`).
-
-**Retain.** The engine torque curve, gearing, rev limiter, engine-braking fade, LSD bias maths, and
-`drivetrain_integrate_wheel()` — all unchanged in behaviour.
-
-**Change.**
-- `drivetrain_calculate_torques()` takes `const float omegaRadS[WHEEL_COUNT]` and
-  `const float tireReactionTorqueNm[WHEEL_COUNT]` instead of the two rear-only pairs.
-- Extract the existing rear LSD logic into a reusable
-  `apply_differential(mode, omegaL, omegaR, reactL, reactR, axleTorqueNm, bias, preloadNm, &tL, &tR)`
-  and call it per **driven** axle.
-- Torque split: `frontShare = FWD ? 1.0 : AWD ? clamp(frontTorqueSplit,0,1) : 0.0`; driveline torque is
-  divided `frontShare` / `1-frontShare` across axles, then through the per-axle differential.
-- `drivetrain_engine_rpm()` takes the mean omega of the **driven** wheels (all four for AWD).
-- `auto_transmission.c` reads rpm through the same path.
-
-**Create.** `src/game/car_roster.h/.c` — pure functions of an index, raylib-free and I/O-free, following
-the `car_corpus.h` precedent:
-```c
-int         car_roster_count(void);                       /* 6 */
-bool        car_roster_spec(int index, VehicleSpec *out);  /* pure */
-void        car_roster_id(int index, char *buf, size_t cap);   /* "rwd_grip" — fs-safe */
-const char *car_roster_display_name(int index);
-uint32_t    car_roster_spec_hash(int index);
-```
-
-| id | layout | seeded from | intended character |
-|---|---|---|---|
-| `rwd_grip` | RWD | Track Predator | high grip, moderate power, LSD — the reference |
-| `rwd_power` | RWD | Pro D1GP | high power, lower rear μ — power oversteer available |
-| `fwd_light` | FWD | Shoebox | light, low power — understeer-limited |
-| `fwd_hot` | FWD | new (Touge Hero mass class) | more power — torque steer, lift-off rotation |
-| `awd_rally` | AWD | Rally Devil | 50/50 split, loose-surface bias |
-| `awd_gt` | AWD | Track Predator + AWD | front-biased split, high grip |
-
-Export to `data/vehicles/roster/*.txt` in the existing tuning-profile format via
-`drifty_tests --generate-roster`, with a round-trip scenario, exactly as `--generate-corpus` does.
-
-**Remove/deprecate.** Nothing.
-
-**Dependencies.** None (parallel with Phase 1).
-
-**Risks.**
-- *Regression on the 8 committed baselines.* This touches the core torque path. Mitigated by the
-  bit-identity requirement below.
-- *AWD centre-differential fidelity.* M1 uses a fixed torque split, not a modelled centre diff. Stated
-  explicitly so nobody assumes otherwise.
-- *FWD steering-axle drive torque* newly couples drive force into the steered wheels. The force rotation
-  in `physics.c:807` already applies each front wheel's own steer angle, so this should fall out — but
-  it is the most likely place for a sign error.
-
-**Validation.**
-- **Bit-identity gate:** with `drivetrainLayout = 0`, all 8 baselines in `tests/baselines/` must compare
-  **byte-identical** via `mk regression`. Any diff means the refactor is wrong, not that the baseline
-  moved.
-- New `scenario_drivetrain_layout`: same spec, same `power-oversteer` script, three layouts. Assert RWD
-  produces the largest positive rear-minus-front slip-angle differential, FWD the smallest (or negative),
-  AWD in between; assert front wheels receive zero drive torque under RWD and nonzero under FWD/AWD.
-- `scenario_roster`: every entry passes `vehicle_spec_is_valid()`; ids are unique and filesystem-safe;
-  the profile export round-trips.
-
-**Done when.** `mk regression` is clean, the three layout scenarios pass, and
-`drifty.exe --list-cars` prints 6 rows.
-
----
-
-## Phase 3 — Remove drift scoring
-
-**Objective.** The drift-specific gameplay layer is gone. Nothing that remains exists solely to serve it.
-
-**Files.** Delete `src/game/scoring.c/.h`. Edit `src/game/game.h/.c`, `src/physics/vehicle.h`,
-`src/physics/physics.c`, `src/render/render_hud.c`, `src/render/render.c`, `src/core/config.h`,
-`Makefile` (`GAME_SRCS`), `tests/scenarios/gameplay_tests.c`.
-
-**Remove.**
-- `scoring.c/.h` entirely; `derived.scoringDrift` (`vehicle.h:231`, `physics.c:1010`).
-- `Game.driftScore`, `bestScore`, `driftTimeS`, `comboMultiplier`, `comboTimerS`.
-- `persistence_load_score()` / `persistence_save_score()` and the `%APPDATA%/drifty/bestscore.txt` file.
-- Config constants: `MIN_DRIFT_SPEED_MPS`, `MIN_DRIFT_ANGLE_RAD`, `MIN_REAR_SLIP_RAD`,
-  `MIN_DRIFT_YAW_RATE_RADS`, `SPIN_CUTOFF_RAD`, `SCORE_BASE_RATE`, `SCORE_SPEED_REF_MPS`,
-  `COMBO_GRACE_S`, `MAX_VALID_SCORE`, `DRIFT_ZOOM_REF_RAD`, `CAMERA_ZOOM_RANGE`.
-- The score HUD card and DRIFT! callout (`render_hud.c:179-196`, `:435`); drift-driven camera zoom.
-- Scoring scenarios in `gameplay_tests.c`: `scoring-accumulation`, `scoring-combo-sweep`,
-  `scoring-determinism`, `crash-scoring-interaction`.
-
-**Retain deliberately.**
-- `derived.physicallySliding` (`physics.c:1006`) — a **physics** output (`maxFrictionUsage >= 0.98`),
-  not a gameplay rule. Tire smoke and the screech in `audio.c` retarget to it.
-- `crashLockoutTimerS` — repurposed from a scoring lockout to the collision-event edge that the
-  `collisions` metric counts.
-- `Game.track.lap` / `lapTimerS` / `lastLapTimeS` — now the primary loop, not a side channel.
-
-**Change.**
-- `game.c:468` particle spawn condition: `derived.scoringDrift` → `derived.physicallySliding &&
-  derived.speedMps > 5.0f`.
-- `game.c:457` results trigger: `RESULTS_TARGET_LAPS` becomes a session lap target rather than a
-  drift-run terminator.
-- Spin / excessive-yaw detection moves out of the simulation entirely into the metrics layer (Phase 5),
-  computed from telemetry columns — see the definition there.
-
-**Dependencies.** None, but sequence it after Phase 1 so the HUD edit and the lap HUD edit land together.
-
-**Risks.** `gameplay_tests.c` currently has ~1766 lines with several scoring scenarios; removing them
-mechanically may take related lap/collision assertions with them. Read each scenario before deleting.
-
-**Validation.** Full `drifty_tests` run passes with the scoring scenarios removed and no others broken;
-`mk regression` clean (scoring was already excluded from the state checksum, so telemetry cannot move);
-`grep -r "driftScore\|scoringDrift\|comboMultiplier" src/ tests/` returns nothing.
-
-**Done when.** The above greps are empty and the suite is green.
-
----
-
-## Phase 4 — AI driver
-
-**Objective.** One repeatable baseline driver that completes a clean lap in all six cars, using only
-steer/throttle/brake, with a structurally auditable separation from the vehicle.
-
-**Files.** New `src/game/ai_driver.h/.c`; `src/game/game.h` (an `AiDriver` block of plain value data),
-`src/game/game.c` (the input substitution point), `Makefile` (`GAME_SRCS`), new
-`tests/scenarios/ai_tests.c`.
-
-**Create.**
-```c
-typedef struct {                 /* pure config, identical for every car */
-    float lookaheadBaseM, lookaheadSpeedS;
-    float corneringGripFraction;      /* < 1.0: drive conservatively */
-    float brakeGripFraction;
-    float steerGainP, steerGainD;
-    float speedGainP;
-} AiDriverConfig;
-
-typedef struct { int targetNodeIndex; float prevCrossTrackErrorM; } AiDriverState;
-
-void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *s,
-                      const Track *track, const VehicleState *vs,
-                      const VehicleDerived *vd, const VehicleSpec *spec,
-                      Input *out, float dt);
-```
-**Every argument except `Input *out` and the driver's own scratch state is `const`.** That is the
-auditable boundary, enforced by the compiler rather than by review.
-
-Algorithm — pure pursuit with a curvature speed target:
-1. Nearest centerline segment → cross-track error and arc position.
-2. Lookahead point at `L = lookaheadBaseM + lookaheadSpeedS · speed` along the centerline.
-3. Steering: `κ = 2·sin(α)/L`, `δ = atan(κ · wheelbaseM)`, normalized by `spec->maxRoadWheelAngleRad`
-   into `out->steer ∈ [-1,1]`, plus a D term on cross-track error. **`+1` is LEFT** (`input.h:31`).
-4. Speed target: maximum centerline curvature over the next few seconds gives
-   `v_target = sqrt(corneringGripFraction · μ_lat · g / κ_max)`, then a braking-distance constraint
-   back-propagated from the tightest upcoming point using `brakeGripFraction · μ_long · g`.
-5. `err = v_target − speed`; `throttle = clamp(speedGainP·err, 0, 1)`,
-   `brake = clamp(−speedGainP·err, 0, 1)`. Never both nonzero.
-6. `out->handbrake` and every one-shot are **never written**.
-
-μ comes from `spec->tireMuLatFront/Rear` and the surface table, so the target speed adapts per car from
-data the car itself publishes — no privileged state.
-
-**Change.** In `game_fixed_update()`, add the AI substitution next to the existing
-`dev.scenarioRunning` branch, **before** `replay_record(&game->replay, &tickInput)`. The AI's inputs are
-therefore recorded in the replay buffer exactly like a human's, so any AI run is replayable and failure
-bundles capture it with no extra work.
-
-**Dependencies.** Phase 1 (needs `Track` centerline), Phase 2 (needs the roster to tune against).
-
-**Risks — this is the highest-risk phase.**
-- *A car cannot complete the lap.* This is the correct outcome if the car has a genuine handling defect.
-  The plan is explicit: **do not tune the AI per car.** One `AiDriverConfig` is shared; a test asserts it.
-  If `fwd_light` cannot make the chicane, the failure and its evidence are the deliverable.
-- *Conservative tuning hides differences.* `corneringGripFraction` too low and every car crawls round
-  identically. Target ~0.80 initially and check that lap times still spread meaningfully across the six.
-- *Pure pursuit oscillates at low lookahead.* Standard; tune `lookaheadSpeedS` and the D gain.
-- *Understeer at the limit* makes the pure-pursuit target unreachable and the controller saturates
-  steering. Acceptable — that *is* the car's weakness being exposed, and telemetry will show it.
-
-**Validation (`tests/scenarios/ai_tests.c`, headless, no video).**
-- `ai-input-only`: run 3600 ticks and assert `handbrake == 0`, no one-shot ever set, and
-  `throttle · brake == 0` on every tick.
-- `ai-no-privilege`: assert the AI writes nothing outside `Input` — verified by running with the AI and
-  with a replay of its recorded input timeline and requiring **identical `stateChecksum`** at every tick.
-  This is the strongest available proof that the AI has no side channel.
-- `ai-uniform-config`: every car is driven with the same `AiDriverConfig` bytes.
-- `ai-completes-lap`: each of the 6 cars completes the out-lap + timed lap within the tick budget.
-- Determinism: two runs of the same car produce identical checksums.
-
-**Done when.** All five scenarios pass for all six cars, headless, with no per-car AI tuning.
-
----
-
-## Phase 5 — Telemetry, metrics, and machine-readable run output
-
-**Objective.** Each run emits a 60 Hz CSV and a `run.json` carrying identity, configuration, checkpoint
-events, summary metrics, and an explicit pass/fail with a reason.
-
-**Files.** `src/game/telemetry.h/.c`, `tests/support/simulation_fixture.c`, new
-`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`, new `docs/VALIDATION_SCHEMA.md`.
-
-**Retain.** The entire existing `TelemetryRow` schema and column order — the header comment already
-establishes "append, never rename" as the convention, and `tests/baselines/` depends on it.
-
-**Change — append to `TelemetryRow`:**
-`checkpointIndex`, `lapIndex`, `lapState` (0 out-lap / 1 timed / 2 complete / 3 aborted),
-`checkpointEvent` (0 none / 1 in-order / 2 out-of-order / 3 lap-complete), `collisionEvent`,
-`distanceToCenterlineM`, `onTrack`, and the two missing per-wheel slip columns (FR and RR — only FL and
-RL are written today), so four-wheel diagnosis is possible.
-
-Everything else on the requested telemetry list is **already present**: time, tick, position, heading,
-`velocityLongitudinal/Lateral`, speed, yaw rate, steering angle, rpm, gear, per-axle slip angle and slip
-ratio, wheel omegas, normal loads, pure and ellipse-limited forces, friction usage, locked flags, drive
-torque, front/rear brake torque, handbrake torque, total body force, yaw torque, sideslip, load transfer,
-filtered/solved longitudinal accel, lateral accel, aero drag, rolling resistance, all four driver inputs,
-per-wheel surface id, and the state checksum. **Not available without invasive physics changes:**
-individual engine output torque per axle after the differential is exposed via
-`derived.differentialTorqueNm[2]` for the rear only — generalizing it is a Phase 2 side effect worth
-taking; true suspension travel/roll angle does not exist (the model is planar) and is out of scope.
-
-**Create — `validation_metrics.c`**, a pure function over the accumulated run:
-`lap_time_s`, `max/mean/median/min_moving_speed_mps`, `p05`/`p95` speed, `time_below_5mps_s`,
-`checkpoints_passed`, `checkpoints_missed`, `out_of_order_events`, `collisions`, `off_track_events`,
-`off_track_time_s`, `spin_events`, `max_abs_sideslip_rad`, `max_yaw_rate_rad_s`, `max_friction_usage`,
-`time_at_friction_limit_s`, `max/min_long_accel_mps2`, `max_abs_lat_accel_mps2`.
-
-Two definitions that replace the deleted classifier, both interval-based so they cannot be inflated by
-sampling rate:
-- **Spin event** — a contiguous interval with `|bodySideslipRad| > 1.48 rad` lasting ≥ 0.25 s while
-  `speed > 2 m/s`. Counted as intervals, not ticks.
-- **Off-track event** — a contiguous interval where all four wheels report a non-asphalt surface for
-  ≥ 0.1 s.
-- **Collision** — a rising edge of `crashLockoutTimerS`.
-
-**Create — `run_report.c`**, writing `run.json` (hand-rolled `fprintf` with escaping, following
-`failure_bundle.c`):
-```json
-{ "schema_version": "1.0.0",
-  "run_id": "20260807-143201-chicane_v1-rwd_grip",
-  "result": { "status": "PASS", "failure_reason": null },
-  "car":   { "id": "rwd_grip", "display_name": "...", "drivetrain": "RWD",
-             "mass_kg": 1220.0, "spec_hash": "a1b2c3d4" },
-  "track": { "id": "chicane", "version": "chicane_v1", "geometry_hash": "...",
-             "checkpoint_count": 8, "length_m": 642.0 },
-  "sim":   { "fixed_hz": 120, "telemetry_hz": 60, "video_fps": 60,
-             "build_commit": "...", "build_dirty": false, "final_state_checksum": "..." },
-  "lap":   { "out_lap_time_s": 33.10, "timed_lap_time_s": 31.482,
-             "checkpoints_passed": 8, "checkpoints_missed": 0, "out_of_order_events": 0 },
-  "metrics": { "...": "see above, units in every key or in docs/VALIDATION_SCHEMA.md" },
-  "artifacts": { "telemetry_csv": "telemetry.csv", "video_mp4": "run.mp4",
-                 "replay": "replay.txt" } }
-```
-
-Failure reasons are a closed set: `checkpoint_missed`, `checkpoint_out_of_order`, `stalled`,
-`tick_budget_exceeded`, `invalid_state` (non-finite), `video_encode_failed`, `spec_invalid`.
-
-**Artifact layout** (flat, sortable, bulk-globbable):
-```
-artifacts/validation/<suite_id>/          suite_id = YYYYMMDD-HHMMSS-<track_version>-<commit>
-  suite.json
-  <car_id>/ run.json  telemetry.csv  run.mp4  replay.txt
-artifacts/validation/latest/              copy of the most recent suite
-```
-
-**Dependencies.** Phases 1, 3, 4.
-
-**Risks.** Appending columns invalidates nothing, but `compare_telemetry.py` must tolerate a wider
-current file than baseline — verify before relying on it.
-
-**Validation.** `scenario_run_report`: a synthetic run produces a `run.json` that parses, carries every
-required key, and reports the injected failure reason; metric maths checked against hand-computed values
-on a fixed sample array. Extend the existing `telemetry` scenario for the new columns.
-
-**Done when.** A headless run of one car writes a valid `run.json` + `telemetry.csv`, and
-`python -c "import json; json.load(open(...))"` succeeds on it.
-
----
-
-## Phase 6 — Deterministic video capture
-
-**Objective.** Every run yields an H.264 MP4 of the whole attempt, with a diagnostic overlay, produced
-from the same deterministic tick loop that produced the telemetry.
-
-**Files.** `src/platform/main.c` (the `--validate-lap` subcommand), new
-`src/render/render_validation_overlay.c`, `src/render/render.h`.
-
-**Retain.** The `--capture-scene` pattern (exact `FIXED_DT_S` stepping, never `GetFrameTime`), and the
-pixel-art render target chain.
-
-**Create.**
-- Frame pump: run 2 fixed ticks → `game_draw(game, 0.0f)` → `LoadImageFromScreen()` → write RGBA bytes
-  to an `ffmpeg` pipe opened with `_popen` → `UnloadImage`. Because 2 ticks = 1 frame and telemetry is
-  also written every 2nd tick, **CSV row *N* and video frame *N* are the same simulation tick.**
-  ```
-  ffmpeg -y -f rawvideo -pix_fmt rgba -s <W>x<H> -r 60 -i - \
-         -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p <out>/run.mp4
-  ```
-- Diagnostic overlay drawn at native resolution after the pixel-art blit (like the HUD): car id, elapsed
-  time, `CP n/m`, speed km/h, lap state (OUT-LAP / TIMED / COMPLETE / FAILED), running pass/fail, and
-  steer/throttle/brake bars showing the AI's actual `Input`.
-
-**Dependencies.** Phases 1, 4, 5.
-
-**Risks.**
-- *Framebuffer orientation.* raylib's `LoadImageFromScreen()` flip behaviour must be **verified**, not
-  assumed; add `-vf vflip` only if the prototype shows it is needed.
-- *Readback throughput.* 3600 frames × 1280×720×4 B ≈ 13 GB streamed per run (through a pipe, never to
-  disk). `glReadPixels` at ~2–5 ms/frame ⇒ roughly 10–20 s per run, ~2 min for the suite. Measure in
-  **prototype P3**; if too slow, read back the 640×360 pixel-art target and let ffmpeg upscale, cutting
-  readback 4×.
-- *ffmpeg absence.* Detect at startup and fail the run with `video_encode_failed` rather than silently
-  producing no artifact.
-
-**Validation.** `mk validate CAR=rwd_grip` produces a playable MP4 whose duration equals
-`frame_count / 60` within one frame; `ffprobe` reports H.264 and the expected frame count; the overlay is
-legible at 1280×720; two runs of the same car produce byte-identical telemetry (the MP4 need not be
-byte-identical — the encoder is not required to be deterministic).
-
-**Done when.** One car produces a correct, playable, overlaid MP4 and its frame count matches its
-telemetry row count.
-
----
-
-## Phase 7 — Suite orchestration and the regression loop
-
-**Objective.** One command validates every car and reports programmatically; a second compares a suite
-against a previous one.
-
-**Files.** New `tools/validation/run_suite.py`, `tools/validation/compare_runs.py`; `Makefile`;
-`src/platform/main.c` (`--list-cars`); `README.md`.
-
-**Create.**
-- `drifty.exe --list-cars` — one id per line, so the suite is enumerated from the binary rather than a
-  hand-maintained list.
-- `run_suite.py`: enumerate → run `--validate-lap --car ID --out DIR` per car → collect `run.json`s into
-  `suite.json` (`{suite_id, commit, track_version, total, passed, failed, runs:[...]}`) → copy to
-  `artifacts/validation/latest/` → exit nonzero if any run failed. `--cars a,b` and `--no-video` flags
-  for fast iteration.
-- `compare_runs.py`: diff two suite directories — pass/fail transitions, lap-time deltas, and per-metric
-  deltas beyond a tolerance; reuses `tools/telemetry/telemetry_common.py` and delegates the time-series
-  diff to the existing `compare_telemetry.py`.
-- Makefile: `validate:`, `validate-car: CAR=`, `validate-compare: A= B=`. **Not** added to `verify` or
-  `ci` — those are headless and this needs a GL context. Documented as such.
-
-**Dependencies.** Phases 5 and 6.
-
-**Risks.** Suite runtime creep. Keep `--no-video` fast enough (<30 s for six cars headless) that the
-inner loop stays usable.
-
-**Validation.** `mk validate` on a clean tree produces six run directories and a `suite.json`; deliberately
-break one car's spec and confirm exit status is nonzero, `suite.json` names the failing car, and its
-artifacts still exist.
-
-**Done when.** The rapid-iteration loop works end to end: change a parameter → `mk validate` →
-read `suite.json` → `compare_runs.py` against the previous suite → open an MP4 only when needed.
-
----
-
-## Prototypes before the larger refactors
-
-Small, throwaway, run in this order. Each answers one question that would otherwise be discovered late.
-
-| | Prototype | Question it answers | Blocks |
-|---|---|---|---|
-| **P1** | Pure-pursuit controller against the *existing* parking-lot perimeter, headless, default car only | Does the control law hold a line at racing speed at all? | Phase 4 |
-| **P2** | Refactor `drivetrain_calculate_torques()` to the 4-wheel signature with `frontShare` hardwired to 0 | Is the refactor bit-identical for RWD? | Phase 2 |
-| **P3** | 600-frame `LoadImageFromScreen` → ffmpeg pipe, timed | Is full-resolution readback fast enough, and is the image upright? | Phase 6 |
-| **P4** | Drive the chicane by hand with collisions on, logging every barrier impulse | Do curve-joint barriers produce spurious impulses? | Phase 1 geometry |
-
----
-
-## Milestone 1 acceptance criteria
-
-**Per car — all six of `rwd_grip`, `rwd_power`, `fwd_light`, `fwd_hot`, `awd_rally`, `awd_gt`:**
-
-1. Enumerated by `drifty.exe --list-cars` and selectable by `--validate-lap --car ID`.
-2. Driven exclusively through the `Input` struct — proven by the `ai-no-privilege` scenario, which
-   requires the recorded input replay to reproduce identical `stateChecksum` at every tick.
-3. Traverses all 8 required checkpoints in order on the timed lap; `checkpoints_missed == 0` and
-   `out_of_order_events == 0`.
-4. Completes a valid lap and produces a finite `timed_lap_time_s > 0`.
-5. Produces a playable H.264 MP4 covering the whole attempt, with the diagnostic overlay.
-6. Produces a `telemetry.csv` whose row count equals the MP4 frame count, and a `run.json` that parses
-   and carries `schema_version`, `car.id`, `car.spec_hash`, `track.version`, `track.geometry_hash`,
-   `run_id`, `sim.build_commit`, `result.status`, and the full metrics block.
-7. Re-runnable through `mk validate` after any handling change, with `compare_runs.py` producing a
-   metric-level diff against the previous suite.
-
-**Suite level:**
-
-8. `mk validate` exits 0 when all six pass and nonzero otherwise, with `suite.json` naming every failure
-   and its `failure_reason`.
-9. Failed runs still produce their MP4, CSV, `run.json` and a failure bundle — evidence is never
-   discarded.
-10. The AI uses one `AiDriverConfig` for all six cars, asserted by `ai-uniform-config`. **A car that
-    cannot complete the lap is a FAIL with diagnostic evidence — never a reason to weaken the driver,
-    widen the track, or special-case that car.**
-11. `mk regression` remains clean against `tests/baselines/`: the drivetrain refactor is bit-identical
-    for RWD, and no drift-scoring removal touched a checksummed field.
-12. `grep -r "driftScore\|scoringDrift\|comboMultiplier" src/ tests/` returns nothing.
-
----
-
-## After Milestone 1 (deliberately secondary, not designed here)
-
-- **M2 — handling pass.** Use the pipeline as the instrument: re-enable steering speed-sensitivity,
-  implement aero downforce (the params already exist), retune the roster, and judge every change by the
-  suite diff rather than by feel.
-- **M3 — race presentation.** Lap/sector HUD, best-lap and delta display, start lights, in-game car
-  selection, results screen. Vsync vs. `SetTargetFPS` belongs here.
-- **M4 — track library.** A second and third circuit, and only then a decision about whether a track
-  file format is worth its parser.
-- **M5 — opponents.** The AI driver is already a controller behind the player input interface, so
-  opponents are a multiplicity problem (multiple `VehicleState`s in `Game`) rather than an AI problem.
-  That multiplicity is the one thing here expensive to retrofit — but it is not forced now, because
-  nothing in Milestone 1 assumes a single vehicle beyond `Game` holding one.
-
----
-
-## Verification of the plan as a whole
+**`linux-headless`** — `ubuntu-latest`. The POSIX branch at [Makefile:78](Makefile) needs raylib
+**headers only** and already falls back to `third_party/raylib-src/src`, so:
 
 ```bash
-mk verify && mk validate && python tools/validation/compare_runs.py artifacts/validation/latest <prev>
+git clone --depth 1 --branch 6.0 https://github.com/raysan5/raylib third_party/raylib-src
 ```
 
-`mk verify` proves the physics did not regress; `mk validate` proves every car still laps the chicane and
-produces its artifacts; `compare_runs.py` proves the handling change you just made did what you expected
-and nothing else.
+No raylib build. Then `apt-get install clang clang-format cppcheck gcovr` and
+`make DRIFTY_STRICT=1 test-physics regression sanitize`. This job is where ASan/UBSan actually run.
+
+### 1.4 `.editorconfig`
+
+Mirror [.clang-format](.clang-format) so editors agree before the formatter runs: `indent_style = space`,
+`indent_size = 4`, `max_line_length = 96`, `end_of_line = lf`, `insert_final_newline = true`,
+`trim_trailing_whitespace = true`. Override `indent_size = 2` for `*.{yml,yaml,json,js}` and
+`*.bat` → `end_of_line = crlf`.
+
+### 1.5 `pyproject.toml` + ruff
+
+One file at root covering all 16 Python files:
+
+- `[project]` — `requires-python = ">=3.9"`, dependencies `numpy`, `pillow` (both currently imported
+  and undeclared — `tools/validation/learn_racing_line.py` and `scripts/run_gameplay_recording.py`
+  cannot run on a fresh clone), plus `matplotlib` if `tools/telemetry/plot_telemetry.py` needs it
+  (verify at implementation time; it may be pure-stdlib like the PNG decoder in `compare_car_rgba.py`).
+- `[tool.ruff]` — `line-length = 96` matching the C style; `select = ["E", "F", "W", "I", "B"]`.
+  **Deliberately excluding `UP`** for now: the codebase uses `from __future__ import annotations` with
+  `typing.Dict`/`List`/`Optional` consistently, and modernizing that is a separate, reviewable change.
+- `per-file-ignores` for `E402` in `tools/telemetry/*` (the intentional `sys.path` prelude).
+
+Add `make format-py` / `make lint-py`, fold `lint-py` into `verify` and both CI jobs.
+
+### 1.6 `.pre-commit-config.yaml`
+
+`pre-commit/mirrors-clang-format` (pinned rev, `files: \.(c|h)$`) + `astral-sh/ruff-pre-commit`
+(lint + format) + `pre-commit-hooks` basics (trailing-whitespace, end-of-file-fixer,
+check-merge-conflict). This is the pattern godot, aseprite, FreeCAD, pandas, and Arrow all use, and
+it fixes format failures at commit time rather than in review.
+
+**Sequencing risk:** [.clang-format](.clang-format) carries an ADOPTION NOTE warning that
+`make format` over the existing tree still produces a diff from hand-aligned tables. `clang-format`
+is not on PATH outside MSYS2 so I could not verify the current state. **First implementation step is
+`make format-check` inside UCRT64.** If it fails, land the normalization as its own reviewable commit
+*before* the pre-commit hook and before CI turns format-check blocking.
+
+### 1.7 `CONTRIBUTING.md`, `CHANGELOG.md`, root de-duplication
+
+- `CONTRIBUTING.md` — extract the workflow content already buried in [README.md](README.md)
+  (prerequisites, `make verify` before pushing, the reload-safety rules, when baselines may be
+  re-recorded and why that needs explaining).
+- `CHANGELOG.md` — Keep a Changelog format, seeded from the existing milestone commits
+  (`b7d1636` racing line, `3ee8a53` scoring removal, `f2d0162` drivetrain, `35b8d3b` chicane track).
+- `CLAUDE.md` and `AGENTS.md` are **byte-identical** (verified). Keep `AGENTS.md` as the real file;
+  replace `CLAUDE.md` with a one-line pointer.
+- Move `/PowerShellEditorServices.json` out of `.git/info/exclude` (a local-only ignore that does not
+  travel to a fresh clone) into [.gitignore](.gitignore). Add `.cache/`. Remove the duplicated
+  `.slim/deepwork/` line.
+
+---
+
+## PR 2 — Structure and cleanup
+
+Closes gaps 3, 4, 5, 9, 10.
+
+### 2.1 Fold `scripts/` into `tools/`
+
+`tools/` is organized by domain and Makefile-wired; `scripts/` is a junk drawer where 5 of 9 entries
+are referenced by nothing.
+
+| Current | Action |
+|---|---|
+| `scripts/setup_windows.ps1` | → `tools/setup/setup_windows.ps1`; update the 5 referrers (Makefile, build.sh, build.bat, mk.bat, README) |
+| `scripts/validate_hotreload.sh` | → `tools/setup/validate_hotreload.sh`; add `make validate-hotreload` |
+| `scripts/compare_car_rgba.py` | → `tools/appearance/`; add `make compare-rgba`. **Keep** — documented by `CAR_VISUAL_RGBA_REGRESSION.md` |
+| `scripts/measure_sprite_rotation.py` | → `tools/appearance/`; add `make measure-rotation`. **Keep** — documented by `CAR_SPRITE_ROTATION_STABILITY.md`; imports the PNG decoder from `compare_car_rgba.py`, so **these two must move together** |
+| `scripts/test_boundary_collision.py` | **Delete** — near-identical Win32 `keybd_event` one-off, named like a test but in no suite |
+| `scripts/test_sustained_right_drive.py` | **Delete** — same |
+| `scripts/run_gameplay_recording.py` | **Delete** — writes to legacy `recording_output/` |
+| `scripts/query_gameplay_review.py` | **Delete** — reads legacy `recording_output/` |
+| `debug/record/record_gameplay.py` | → `tools/recording/record_gameplay.py`; add `make record`. **Keep** — the current recorder |
+
+Rule after this: **every surviving tool has a Makefile target.** A tool with no entry point is a tool
+nobody runs.
+
+### 2.2 Artifact retention
+
+`artifacts/` is 959 MB across 142 entries (116 are `failure-*-<timestamp>/` bundles); `debug/record/`
+is 212 MB; `recording_output/` is 7.5 MB of superseded output. All correctly ignored — nothing is
+ever reaped.
+
+- Add `make clean-artifacts` keeping the N newest `failure-*` bundles (default 10), and
+  `make clean-artifacts KEEP=0` for a full purge. Model it on the existing `clean-telemetry:`
+  target ([Makefile:627](Makefile)).
+- Delete outright — these are not run evidence: `artifacts/physics_tests.c.preexisting` (333 KB),
+  `artifacts/reorganization-{list,suite}.{before,after}.txt`, `artifacts/_final_linkage.sh`,
+  `artifacts/_organization_assert.ps1`, `artifacts/report_skidpad.html` (742 KB),
+  `artifacts/junit.xml`.
+- Delete `recording_output/` and drop its now-dead `.gitignore` entry.
+
+### 2.3 `docs/` — index and triage
+
+Every doc is unreachable from the README. Add `docs/README.md` as the index and link it from
+[README.md](README.md). Split into `docs/design/` (describes current behavior) and `docs/notes/`
+(historical, dated, marked resolved).
+
+**Live → `docs/design/`:** `VALIDATION_SCHEMA.md` (the `run.json`/`suite.json` contract that
+`tools/validation/run_suite.py` produces) · `RACING_LINE_OPTIMIZATION.md` (landed in `b7d1636`) ·
+`CAR_SPRITE_ROTATION_STABILITY.md` and `CAR_VISUAL_RGBA_REGRESSION.md` (tool documentation for two
+scripts being kept in 2.1).
+
+**Delete:** `GAME_INTERACTION_RECORDING_AND_REVIEW.md` — a research report proposing five options,
+none chosen, referencing a `scripts/analyze_trace.py` that has never existed and a
+`recording_output/` being deleted. `ADVERSARIAL_CRITIQUE.md` — a point-in-time Phase 2 evaluation
+whose entire evidence base is `recording_output/`.
+
+**Triage individually — do not blanket-delete:** the three `Status: draft implementation contract`
+docs (`CAR_APPEARANCE_IDENTITY_PROPOSAL.md`, `CAR_VISUAL_PRIMITIVES_PROPOSAL.md`,
+`DYNAMIC_CAR_VISUAL_EFFECTS_PROPOSAL.md`). `src/render/car_visual.c`, `car_visual_raster.c`, and
+`vehicle_effects.c` all exist, so these were probably implemented. For each: if implemented, update
+the status line and move to `docs/design/`; if superseded, move to `docs/notes/` with a resolution
+note. Deleting a spec that still describes shipped behavior is the one irreversible mistake here.
+
+Trim [README.md](README.md) (17 KB) to overview + quickstart + pointers, moving the workflow prose to
+`CONTRIBUTING.md` and the rest behind the docs index.
+
+### 2.4 Visual testing cross-reference
+
+`tests/visual/baseline/` (10 PNGs) and `tools/visual/` (Playwright, `serve.js`, specs) are a single
+system in two trees. The split is defensible — baselines with tests, runner with tools — but is
+documented in neither. Add a cross-reference paragraph to `tests/visual/README.md` and a
+`tools/visual/README.md`, and note the `npm` prerequisite in `CONTRIBUTING.md`.
+
+---
+
+## PR 3 — Depth
+
+Closes gap 7 and hardens 1.
+
+### 3.1 `.clang-tidy`
+
+The highest-value C linter and the one gap where every serious peer beats this repo (neovim runs
+`WarningsAsErrors: '*'`). `compile_commands.json` is already generated by
+[tools/build/gen_compile_commands.py](tools/build/gen_compile_commands.py) via `make compile-commands`,
+so the input exists.
+
+Start from the SerenityOS/aseprite exclusion sets: `bugprone-*, clang-analyzer-*, cert-*,
+performance-*, readability-*` minus `-bugprone-easily-swappable-parameters`,
+`-readability-magic-numbers`, `-readability-function-cognitive-complexity`,
+`-readability-identifier-length`. `HeaderFilterRegex: '^src/|^tests/'`.
+
+Add `make tidy` reusing `$(ANALYZE_SRCS)` — the existing set at [Makefile:186](Makefile) that already
+excludes `main.c`, the hot-reload loader, `dev_lab.c` (mostly vendored raygui), the harness entry
+point, and the fuzz drivers. **Gate on changed-files-only in CI** (`git diff --name-only origin/main`)
+so 19.5k lines of pre-existing findings do not block every PR; a full-tree `make tidy` runs nightly.
+
+### 3.2 `.github/workflows/nightly.yml`
+
+Scheduled, non-blocking. Runs the things too slow or too noisy for PR CI, several of which the
+Makefile already anticipates:
+
+- `cppcheck --enable=all` including `unusedFunction` — the [Makefile:378](Makefile) `lint:` comment
+  explicitly defers this to "the nightly `--enable=all` pass". This is where the deferral becomes real.
+- Full-tree `make tidy`
+- `make coverage`, uploading the Cobertura output
+- `make fuzz` with a longer budget than the current brief run
+- `make sanitize` on Linux
+
+---
+
+## Verification
+
+Run in order; each PR is verifiable on its own.
+
+**PR 1**
+1. `make format-check` inside MSYS2 UCRT64 — must pass before pre-commit or CI become blocking. If it
+   fails, land the normalization commit first (see 1.6).
+2. `make DRIFTY_STRICT=1 verify` locally → passes with tools installed.
+3. Temporarily rename `cppcheck` on PATH, re-run → must **fail** with `MISSING lint: ...`, not pass
+   with `SKIP`. This is the whole point of 1.2; verify it directly.
+4. `ruff check .` and `ruff format --check .` → clean.
+5. `pre-commit run --all-files` → clean.
+6. Push the branch; both CI jobs green. Confirm the Linux job's raylib clone succeeded and that
+   `sanitize` actually ran there (not skipped).
+7. `python -c "import numpy, PIL"` after `pip install -e .` → the fresh-clone path for
+   `tools/validation/learn_racing_line.py` works.
+
+**PR 2**
+8. `make verify` still passes after the `scripts/` → `tools/` move — catches any missed referrer in
+   Makefile, build.sh, build.bat, mk.bat, or `.vscode/tasks.json`.
+9. `grep -rn "scripts/" Makefile build.sh build.bat mk.bat README.md docs/ .vscode/` → no hits for
+   moved or deleted paths.
+10. Each new Makefile target runs: `make validate-hotreload`, `make compare-rgba`,
+    `make measure-rotation`, `make record`.
+11. `make clean-artifacts KEEP=2` → exactly 2 `failure-*` bundles survive; `make test-physics
+    regression` still passes afterward (confirms nothing under `artifacts/` was load-bearing).
+12. `tests/baselines/` untouched — it is committed and must not be swept.
+13. Every link in `docs/README.md` resolves.
+
+**PR 3**
+14. `make compile-commands && make tidy` completes; record the baseline finding count.
+15. Open a trivial PR touching one `src/` file → the changed-files clang-tidy gate runs and passes.
+16. Trigger `nightly.yml` via `workflow_dispatch` → completes, coverage artifact uploaded.
+
+**Regression guard, all three PRs:** `make test-physics regression` must pass unchanged. No change in
+this plan touches `src/` behavior, so any telemetry drift against `tests/baselines/` means something
+was moved that shouldn't have been.

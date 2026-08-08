@@ -1,4 +1,4 @@
-# Python tooling for the repository's dev scripts under tools/ and scripts/.
+# Python tooling for the repository's standalone scripts under tools/.
 #
 # There is deliberately no [project] table: none of this is an installable package, it is a
 # set of standalone scripts invoked by path from the Makefile. Declaring a package here would
