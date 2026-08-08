@@ -335,7 +335,7 @@ static void scenario_run_report(void)
         TelemetryRow laps[27];
         memset(laps, 0, sizeof(laps));
         for (int i = 0; i < 27; i++) {
-            laps[i].timeS = (float)(i + 1) * 0.1f;
+            laps[i].timeS = (double)(i + 1) * 0.1;
             laps[i].speedMps = 20.0f;
             laps[i].onTrack = 1;
         }

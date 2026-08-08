@@ -206,7 +206,10 @@ def main(argv: List[str] | None = None) -> int:
 
         if status == "PASS":
             passed_count += 1
-            print(f"     PASS (best {best_time:.3f} s, mean {mean_time:.3f} s over {RUN_LAPS - 1} timed laps)")
+            print(
+                f"     PASS (best {best_time:.3f} s, mean {mean_time:.3f} s over "
+                f"{RUN_LAPS - 1} timed laps)"
+            )
         else:
             failed_count += 1
             print(f"     FAIL ({reason})")
