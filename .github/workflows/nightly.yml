@@ -28,7 +28,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang clang-format clang-tidy cppcheck gcovr
-          uv pip install --system --break-system-packages -r requirements-dev.txt
+          uv venv /tmp/drifty-tools
+          uv pip install --python /tmp/drifty-tools/bin/python -r requirements-dev.txt
+          echo "/tmp/drifty-tools/bin" >> "$GITHUB_PATH"
 
       - name: Fetch raylib headers
         run: |

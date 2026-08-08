@@ -87,7 +87,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang clang-format cppcheck gcovr
-          uv pip install --system --break-system-packages -r requirements-dev.txt
+          # A uv venv is user-owned, so it sidesteps both the externally-managed marker on
+          # the /usr python and the root-only /usr/local site-packages. Its bin goes on PATH
+          # so the Makefile's `command -v ruff` resolves.
+          uv venv /tmp/drifty-tools
+          uv pip install --python /tmp/drifty-tools/bin/python -r requirements-dev.txt
+          echo "/tmp/drifty-tools/bin" >> "$GITHUB_PATH"
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
