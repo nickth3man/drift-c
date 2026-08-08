@@ -393,8 +393,11 @@ bundles capture it with no extra work.
 - `ai-no-privilege`: assert the AI writes nothing outside `Input` — verified by running with the AI and
   with a replay of its recorded input timeline and requiring **identical `stateChecksum`** at every tick.
   This is the strongest available proof that the AI has no side channel.
-- `ai-uniform-config`: every car is driven with the same `AiDriverConfig` bytes.
-- `ai-completes-lap`: each of the 6 cars completes the out-lap + timed lap within the tick budget.
+- `ai-roster-laps`: every car is driven with the same `AiDriverConfig` bytes (snapshotted before
+  the roster loop and re-checked after each car), **and** each of the 6 cars completes the
+  out-lap + timed lap within the tick budget. Planned here as two scenarios
+  (`ai-uniform-config` and `ai-completes-lap`); they landed as one, because both assertions
+  need the same roster loop and splitting them would run all six cars twice to assert less.
 - Determinism: two runs of the same car produce identical checksums.
 
 **Done when.** All five scenarios pass for all six cars, headless, with no per-car AI tuning.
@@ -602,7 +605,7 @@ Small, throwaway, run in this order. Each answers one question that would otherw
    and its `failure_reason`.
 9. Failed runs still produce their MP4, CSV, `run.json` and a failure bundle — evidence is never
    discarded.
-10. The AI uses one `AiDriverConfig` for all six cars, asserted by `ai-uniform-config`. **A car that
+10. The AI uses one `AiDriverConfig` for all six cars, asserted by `ai-roster-laps`. **A car that
     cannot complete the lap is a FAIL with diagnostic evidence — never a reason to weaken the driver,
     widen the track, or special-case that car.**
 11. `mk regression` remains clean against `tests/baselines/`: the drivetrain refactor is bit-identical

@@ -1141,6 +1141,13 @@ static void scenario_ai_roster_laps(void)
     AiDriverConfig cfg;
     ai_driver_config_default(&cfg);
 
+    /* Milestone 1 acceptance criterion 10: one config drives all six cars. The bytes are
+     * snapshotted here and re-checked after every car, so per-car AI tuning -- the sanctioned
+     * way to make a car that cannot lap appear to pass -- fails this scenario rather than
+     * quietly becoming the new baseline. */
+    AiDriverConfig cfgAtStart;
+    memcpy(&cfgAtStart, &cfg, sizeof(cfg));
+
     const int rosterCount = car_roster_count();
     check(rosterCount == 6, "car roster holds 6 cars");
 
@@ -1184,6 +1191,8 @@ static void scenario_ai_roster_laps(void)
               game->track.lap, ticksRun);
         check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
               outOfOrder);
+        check(memcmp(&cfg, &cfgAtStart, sizeof(cfg)) == 0,
+              "car '%s' was driven with the unmodified shared AiDriverConfig", carId);
 
         track_free(&game->track);
         free(game);
