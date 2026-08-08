@@ -204,7 +204,7 @@ Or the fuller script (harness + failed-compile preservation):
 
 ```bash
 # inside MSYS2 UCRT64, from the repo root
-./scripts/validate_hotreload.sh
+./tools/setup/validate_hotreload.sh
 ```
 
 ### When a restart is required
@@ -283,8 +283,8 @@ sliders, the profile format, the telemetry metadata, and the `--dump-params` tab
 ```
 Makefile, build.sh, build.bat   build entry points; all terminate immediately
 mk.bat                          run a Makefile target inside MSYS2 UCRT64 from cmd.exe
-scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
-scripts/validate_hotreload.sh   harness + failed-compile preservation
+tools/setup/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
+tools/setup/validate_hotreload.sh   harness + failed-compile preservation
 src/platform/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/platform/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/platform/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list

@@ -11,7 +11,7 @@
  *   - stale load copies are cleaned up after unload
  *
  * Failed-compile preservation of build/dev/game.dll is exercised by
- * scripts/validate_hotreload.sh (the harness itself must not depend on a live
+ * tools/setup/validate_hotreload.sh (the harness itself must not depend on a live
  * interactive drifty.exe).
  */
 #ifndef _WIN32
@@ -180,7 +180,7 @@ int main(void)
 
     /* Publish a fresh, valid candidate. Copying the known-good backup with a new mtime
      * exercises the loader swap without nesting a compiler inside system(). The companion
-     * scripts/validate_hotreload.sh covers deliberate compile-failure preservation. */
+     * tools/setup/validate_hotreload.sh covers deliberate compile-failure preservation. */
     if (!CopyFileA("build/dev/game_harness_backup.dll", GAME_MODULE_NAME, FALSE)) {
         fprintf(stderr, "harness: failed to publish valid candidate\n");
         Game_UnloadModule();

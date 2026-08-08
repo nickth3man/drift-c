@@ -58,7 +58,9 @@ def sha256_bytes(data):
 
 
 def get_next_log_dir():
-    base_logs = Path("debug/record/logs").resolve()
+    # Run evidence belongs under artifacts/ with everything else ephemeral, so one ignore
+    # rule and one retention policy (`make clean-artifacts`) cover it.
+    base_logs = Path("artifacts/recordings").resolve()
     base_logs.mkdir(parents=True, exist_ok=True)
     today_str = time.strftime("%d-%m-%y")
 

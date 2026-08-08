@@ -2,7 +2,7 @@
 
 The existing appearance scenarios correctly test semantic label differences and geometry signatures. They do not answer a separate review question: did the actual displayed colors, alpha occupancy, or silhouette pixels change?
 
-`scripts/compare_car_rgba.py` compares two 8-bit RGB or RGBA PNGs using only the Python standard library. It validates PNG CRCs, decodes all five PNG row filters, and reports:
+`tools/appearance/compare_car_rgba.py` compares two 8-bit RGB or RGBA PNGs using only the Python standard library. It validates PNG CRCs, decodes all five PNG row filters, and reports:
 
 - ratio of pixels whose RGBA value changed;
 - ratio of occupied pixels that entered or left the alpha mask;
@@ -26,7 +26,7 @@ build/tests/drifty_tests.exe --dump-corpus-cards artifacts/candidate-cars
 Each directory contains one rendered PNG and one label-map PNG per corpus vehicle. Compare a focused vehicle exactly:
 
 ```text
-python scripts/compare_car_rgba.py \
+python tools/appearance/compare_car_rgba.py \
   artifacts/baseline-cars/archetype_00_stock_baseline.png \
   artifacts/candidate-cars/archetype_00_stock_baseline.png
 ```
@@ -36,7 +36,7 @@ The default thresholds are all zero, so the command is an exact regression gate.
 For an intentionally palette-only change, allow color error while keeping silhouette occupancy exact:
 
 ```text
-python scripts/compare_car_rgba.py BASELINE.png CANDIDATE.png \
+python tools/appearance/compare_car_rgba.py BASELINE.png CANDIDATE.png \
   --max-alpha-xor-ratio 0 \
   --max-differing-ratio 1 \
   --max-rgb-rmse 80 \

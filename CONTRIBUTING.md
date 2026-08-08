@@ -9,7 +9,7 @@ mechanics: what to install, what to run, and what has to be green before you pus
 in the [README](README.md#prerequisites-windows--msys2-ucrt64) and run:
 
 ```bash
-scripts/setup_windows.ps1
+tools/setup/setup_windows.ps1
 ```
 
 Expected by `make verify`: `clang`, `clang-tools-extra` (clang-format), and `cppcheck`.
@@ -129,7 +129,7 @@ the link output only moves into place on success.
 Validate it without a window:
 
 ```bash
-scripts/validate_hotreload.sh
+tools/setup/validate_hotreload.sh
 ```
 
 ## Commits and pull requests

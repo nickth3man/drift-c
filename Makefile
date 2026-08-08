@@ -29,6 +29,10 @@
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make format-py        apply ruff to the Python   make lint-py       check only
+#   make validate-hotreload  bounded hot-reload + failed-compile preservation checks
+#   make compare-rgba A=.. B=..     compare two car PNGs
+#   make measure-rotation PNG=..    sprite rotation stability
+#   make record           drive the running game and record run evidence
 #   make lint             cppcheck                   make analyze       clang --analyze
 #   make fuzz             build and briefly run the libFuzzer targets (clang)
 #   make clean            remove every generated artifact
@@ -70,10 +74,10 @@ endif
 
 PKGCONFIG := $(shell command -v pkg-config 2>/dev/null)
 ifeq ($(PKGCONFIG),)
-$(error pkg-config not found. Run scripts/setup_windows.ps1.)
+$(error pkg-config not found. Run tools/setup/setup_windows.ps1.)
 endif
 ifeq ($(shell pkg-config --exists raylib 2>/dev/null && echo yes),)
-$(error pkg-config cannot find raylib. Run scripts/setup_windows.ps1.)
+$(error pkg-config cannot find raylib. Run tools/setup/setup_windows.ps1.)
 endif
 
 RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
@@ -231,6 +235,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
+        validate-hotreload compare-rgba measure-rotation record \
         clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
@@ -384,6 +389,32 @@ endif
 
 # The Python half of the same two targets. Configuration lives in pyproject.toml; ruff is the
 # only third-party package this repository needs (requirements-dev.txt).
+
+# ---------------------------------------------------------------------------- dev tools --
+#
+# Every tool under tools/ is reachable from here. A tool with no entry point is a tool nobody
+# runs and nobody notices rotting — which is how four scripts ended up referenced by nothing.
+
+# Bounded hot-reload validation: harness plus deliberate-compile-failure preservation.
+validate-hotreload:
+	@tools/setup/validate_hotreload.sh
+
+# Compare two car PNGs by colour, alpha occupancy, and silhouette. Pure stdlib.
+#   make compare-rgba A=before.png B=after.png
+compare-rgba:
+	@test -n "$(A)" -a -n "$(B)" || { echo "usage: make compare-rgba A=<before.png> B=<after.png>" >&2; exit 2; }
+	@$(PYTHON) tools/appearance/compare_car_rgba.py "$(A)" "$(B)"
+
+# Rotate a sprite through a full turn and report area, edge, and pivot stability.
+#   make measure-rotation PNG=artifacts/corpus-cards/car_00.png
+measure-rotation:
+	@test -n "$(PNG)" || { echo "usage: make measure-rotation PNG=<sprite.png>" >&2; exit 2; }
+	@$(PYTHON) tools/appearance/measure_sprite_rotation.py "$(PNG)"
+
+# Drive the running game and record telemetry, frames, and a review manifest into
+# artifacts/recordings/. Interactive: it operates a real window.
+record: windows-only
+	@$(PYTHON) tools/recording/record_gameplay.py $(RECORD_ARGS)
 
 format-py:
 ifeq ($(RUFF),)

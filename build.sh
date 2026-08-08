@@ -41,7 +41,7 @@ fi
 
 CC="${CC:-gcc}"
 if ! command -v "$CC" >/dev/null 2>&1; then
-    echo "build.sh: '$CC' not found on PATH. Run scripts/setup_windows.ps1." >&2
+    echo "build.sh: '$CC' not found on PATH. Run tools/setup/setup_windows.ps1." >&2
     exit 127
 fi
 
@@ -56,7 +56,7 @@ case "$CC_PATH" in
 esac
 
 if ! command -v pkg-config >/dev/null 2>&1; then
-    echo "build.sh: pkg-config not found. Run scripts/setup_windows.ps1." >&2
+    echo "build.sh: pkg-config not found. Run tools/setup/setup_windows.ps1." >&2
     exit 127
 fi
 
@@ -70,7 +70,7 @@ case "$PKG_PATH" in
 esac
 
 if ! pkg-config --exists raylib; then
-    echo "build.sh: pkg-config cannot find raylib. Run scripts/setup_windows.ps1." >&2
+    echo "build.sh: pkg-config cannot find raylib. Run tools/setup/setup_windows.ps1." >&2
     exit 127
 fi
 
@@ -145,11 +145,11 @@ EXTRA_DEFINES="${DRIFTY_EXTRA_DEFINES:-}"
 # GNU Make specifically: `print-source-groups` is built on $(foreach) and the export relies on
 # --no-print-directory, neither of which a BSD or NMAKE-style make provides.
 if ! command -v make >/dev/null 2>&1; then
-    echo "build.sh: make not found. Run scripts/setup_windows.ps1." >&2
+    echo "build.sh: make not found. Run tools/setup/setup_windows.ps1." >&2
     exit 1
 fi
 if ! make --version 2>/dev/null | grep -qi "GNU Make"; then
-    echo "build.sh: '$(command -v make)' is not GNU Make. Run scripts/setup_windows.ps1." >&2
+    echo "build.sh: '$(command -v make)' is not GNU Make. Run tools/setup/setup_windows.ps1." >&2
     exit 1
 fi
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/validate_hotreload.sh — bounded hot-reload + failed-build preservation checks.
+# tools/setup/validate_hotreload.sh — bounded hot-reload + failed-build preservation checks.
 # Must run under MSYS2 UCRT64 (via build.bat --hotreload-harness path or directly).
 set -eu
 
