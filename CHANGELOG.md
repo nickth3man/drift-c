@@ -23,6 +23,15 @@ The project is pre-release and has no version tags yet, so entries are grouped u
   than a per-developer `core.autocrlf` setting.
 - `CONTRIBUTING.md`, covering setup, what must be green before pushing, the hot-reload rules,
   and when re-recording baselines is legitimate.
+- A failure bundle for failed `--validate-lap` runs, written beside the run's own artifacts.
+  Milestone 1 acceptance criterion 9 requires a failed run to keep every piece of evidence;
+  `run.json`, `telemetry.csv`, `run.mp4` and `replay.txt` were already written, but the one
+  artifact that reproduces the failure on its own was not.
+- A time-series diff in `tools/validation/compare_runs.py`, delegated to
+  `tools/telemetry/compare_telemetry.py` as PLAN Phase 7 specifies. The tool previously diffed
+  only the `run.json` and `suite.json` scalars, so a change that moved the whole time series
+  while leaving lap time and pass/fail intact compared clean. Breaches are reported, never
+  gated: after an intentional handling change every car's time series is expected to move.
 
 ### Changed
 
@@ -45,6 +54,15 @@ The project is pre-release and has no version tags yet, so entries are grouped u
   still pointed at `tools/*.py`, which had moved into six subdirectories. It also quoted a
   scenario count that was four short; the count is no longer quoted, on the same reasoning the
   check count already wasn't.
+- `src/dev/failure_bundle.c` moved from `DEV_SRCS` to `SHARED_SRCS`. The dev executable links
+  `PLATFORM_SRCS + SHARED_SRCS + HOTRELOAD_SRC` and reaches game code only through the
+  hot-reload module, so the platform layer could not call into a file in `GAME_SRCS`.
+- Milestone 1 acceptance criterion 10 now names `ai-roster-laps`, the scenario that exists.
+  It named `ai-uniform-config`, which never did; Phase 4 planned that scenario and
+  `ai-completes-lap` separately and they landed as one, because both assertions need the same
+  roster loop. `ai-roster-laps` now also snapshots the shared `AiDriverConfig` and re-checks it
+  after each car, so the per-car AI tuning the criterion forbids fails the scenario instead of
+  passing unnoticed.
 
 ### Removed
 

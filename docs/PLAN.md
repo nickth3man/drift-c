@@ -517,12 +517,21 @@ pixel-art render target chain.
 **Risks.**
 - *Framebuffer orientation.* raylib's `LoadImageFromScreen()` flip behaviour must be **verified**, not
   assumed; add `-vf vflip` only if the prototype shows it is needed.
+  → **Verified upright.** A frame extracted from `run.mp4` reads correctly. No `-vf vflip`; none added.
 - *Readback throughput.* 3600 frames × 1280×720×4 B ≈ 13 GB streamed per run (through a pipe, never to
   disk). `glReadPixels` at ~2–5 ms/frame ⇒ roughly 10–20 s per run, ~2 min for the suite. Measure in
   **prototype P3**; if too slow, read back the 640×360 pixel-art target and let ffmpeg upscale, cutting
   readback 4×.
+  → **Measured 17.2 s** for one 4093-frame car, 5.2 min for the 18-run suite. Within the estimate, so
+  full-resolution readback is kept and the 640×360 fallback is **not** taken.
 - *ffmpeg absence.* Detect at startup and fail the run with `video_encode_failed` rather than silently
   producing no artifact.
+  → **Verified**, but detection is at first frame write, not at startup: `_popen` on Windows succeeds
+  even when the command does not exist, so the failure surfaces when `fwrite` to the pipe fails and
+  `_pclose` returns nonzero. The run then ends with `video_encode_failed` and a nonzero exit. The
+  consequence is that this one failure mode aborts at frame 1, so its CSV holds a single row and no
+  MP4 exists — the only case where criterion 9's "failed runs still produce their MP4, CSV" cannot
+  hold, because the encoder *is* the failure.
 
 **Validation.** `mk validate CAR=rwd_grip` produces a playable MP4 whose duration equals
 `frame_count / 60` within one frame; `ffprobe` reports H.264 and the expected frame count; the overlay is
@@ -611,6 +620,42 @@ Small, throwaway, run in this order. Each answers one question that would otherw
 11. `mk regression` remains clean against `tests/baselines/`: the drivetrain refactor is bit-identical
     for RWD, and no drift-scoring removal touched a checksummed field.
 12. `grep -r "driftScore\|scoringDrift\|comboMultiplier" src/ tests/` returns nothing.
+
+---
+
+## Milestone 1 status — complete
+
+All twelve acceptance criteria verified against a real suite run on 2026-08-08 (Windows 11,
+MSYS2 UCRT64, suite `20260808-031548-track-suite_v2-edd66b7`). The suite runs **18 cases** — six
+cars across three tracks (`chicane`, `sprint`, `technical`) — rather than the six this plan
+originally scoped; the extra tracks and start gates landed with the harness.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Enumerated by `--list-cars`, selectable by `--validate-lap --car` | 6/6; all 18 cases ran by id |
+| 2 | Driven only through `Input`, proven by `ai-no-privilege` | pass, 3 checks |
+| 3 | All gates in order; `checkpoints_missed == 0`, `out_of_order_events == 0` | 18/18, 16 crossings each |
+| 4 | Finite `timed_lap_time_s > 0` | 18/18, 24.900 s – 47.900 s |
+| 5 | Playable H.264 MP4 with the diagnostic overlay | 18/18 h264 1280×720 |
+| 6 | CSV row count == MP4 frame count; `run.json` carries every required key | 18/18 exact parity |
+| 7 | Re-runnable, with `compare_runs.py` giving a metric-level diff | pass; also proves determinism |
+| 8 | `mk validate` exits 0 all-pass, nonzero otherwise, failures named | 0 on 18/18; 1 with the break |
+| 9 | Failed runs keep MP4, CSV, `run.json` and a failure bundle | verified (see the ffmpeg caveat) |
+| 10 | One `AiDriverConfig` for all six cars | asserted per car by `ai-roster-laps` |
+| 11 | `mk regression` clean against `tests/baselines/` | 46 comparisons, no breaches |
+| 12 | No `driftScore` / `scoringDrift` / `comboMultiplier` | no matches |
+
+Criterion 8 was tested by crippling `fwd_light`'s tire μ: the suite exited 1, `suite.json` named
+all three of its cases with `checkpoint_missed`, and each kept its artifacts and bundle. The
+break was reverted.
+
+Two things this milestone deliberately did **not** do, both on criterion 10's rule that a car
+which cannot lap is a finding rather than a reason to tune: no AI parameter and no track
+geometry was changed to make any car pass. Every car laps on the shared config as it stands.
+
+Known cosmetic defect, not blocking: in the captured frame the validation overlay's
+steer/throttle/brake panel overlaps the game HUD's speed card, so the HUD's gear readout sits
+under the brake bar. The diagnostic overlay's own fields are all legible.
 
 ---
 
