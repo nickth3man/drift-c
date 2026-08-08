@@ -54,7 +54,6 @@ jobs:
             clang:p
             clang-tools-extra:p
             cppcheck:p
-            gcovr:p
             python:p
 
       - name: Resolved toolchain
@@ -79,17 +78,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang clang-format cppcheck gcovr
+            clang clang-format cppcheck
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
       # tree and stop — no build, no install. third_party/raylib-src is the fallback path
       # the Makefile already looks for, and it is gitignored.
+      # Pinned by commit, for the same reason the actions above are: a tag can be moved or
+      # deleted, and this is the job's only external build input. dbc56a8 is tag 6.0, which
+      # is also the version the UCRT64 job's `raylib:p` package ships, so both jobs compile
+      # the headless set against the same headers.
       - name: Fetch raylib headers
         run: |
-          git clone --depth 1 --branch 6.0 \
-            https://github.com/raysan5/raylib third_party/raylib-src
+          RAYLIB_SHA=dbc56a87da87d973a9c5baa4e7438a9d20121d28  # tag 6.0
+          git init -q third_party/raylib-src
+          git -C third_party/raylib-src fetch -q --depth 1 \
+            https://github.com/raysan5/raylib "$RAYLIB_SHA"
+          git -C third_party/raylib-src checkout -q FETCH_HEAD
 
       - name: Resolved toolchain
         run: make info
@@ -107,9 +113,9 @@ jobs:
       # launch_stop), with identical aggregate metrics but large single-row deltas — the
       # signature of a discrete event landing one tick apart, not of drifting physics.
       #
-      # The scenario assertions themselves pass identically on both hosts (110 scenarios,
-      # 5768 checks), so behaviour is not in question; byte-level reproduction across libms
-      # is, and the project has never claimed it. Windows CI gates the baselines.
+      # The scenario assertions themselves pass identically on both hosts, so behaviour is
+      # not in question; byte-level reproduction across libms is, and the project has never
+      # claimed it. Windows CI gates the baselines.
       - name: Physics scenarios
         run: make DRIFTY_STRICT=1 test-physics
 

@@ -27,7 +27,14 @@ indent_style = tab
 [*.bat]
 end_of_line = crlf
 
-# Vendored, unmodified. Never reformat.
+# Vendored, unmodified. Never reformat. Every inherited property from [*] is explicitly
+# unset, not just the two destructive ones — otherwise an editor still applies this project's
+# indentation and LF conversion to an upstream header and produces churn against the file we
+# promised to keep byte-identical.
 [third_party/**]
-trim_trailing_whitespace = false
-insert_final_newline = false
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+indent_style = unset
+indent_size = unset
+end_of_line = unset
+charset = unset

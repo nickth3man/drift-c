@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build one self-contained HTML report for a telemetry run.
 
-    python tools/telemetry/make_report.py \
-        artifacts/telemetry/scenario_skidpad.csv --out artifacts/report.html
+    python tools/telemetry/make_report.py TELEMETRY.csv --out artifacts/report.html
     python tools/telemetry/make_report.py current.csv --baseline tests/baselines/skidpad.csv
     python tools/telemetry/make_report.py --dir artifacts/telemetry --out artifacts/report.html
 

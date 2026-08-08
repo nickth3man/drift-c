@@ -57,7 +57,7 @@ previous step's solved body-longitudinal acceleration, transfers axle load from 
 CG geometry, propagates the dynamic loads into tire capacity, and applies separated
 quadratic aerodynamic drag and per-wheel rolling resistance.
 
-The headless runner covers 54 scenarios. (The check count is not quoted here — it moves with
+The headless runner covers 110 scenarios. (The check count is not quoted here — it moves with
 every parameter added, and `./build/tests/drifty_tests.exe` prints the current total.) Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
 steer, lift-off, transition, and a catchable drift. They live in `tests/baselines/`;

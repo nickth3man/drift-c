@@ -10,6 +10,9 @@
 # Linter and formatter for everything under tools/ and scripts/. Configured in pyproject.toml.
 ruff==0.15.20
 
+# Runs the hooks in .pre-commit-config.yaml. `pre-commit install` needs this present first.
+pre-commit>=4.0
+
 # Nothing else. Every remaining script is pure-stdlib, which is why the appearance and
 # telemetry checks run on a bare Python with nothing installed. Pillow was the one exception
 # and left with scripts/run_gameplay_recording.py.

@@ -636,7 +636,9 @@ ci: format-check lint-py lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
 ifdef DRIFTY_STRICT
-	@echo "ci: all checks ran and passed (DRIFTY_STRICT: nothing was skipped)."
+	@echo "ci: every check whose tool exists ran and passed (DRIFTY_STRICT)."
+	@echo "    A missing tool would have failed. Platform-limited checks can still skip:"
+	@echo "    on UCRT64 that is sanitize, which has no linkable ASan/UBSan runtime here."
 else
 	@echo "ci: core local checks passed; inspect any SKIP lines above."
 	@echo "    A SKIP is not a pass. Re-run with DRIFTY_STRICT=1 to make one fail."

@@ -3,8 +3,7 @@
 
     python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv
     python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv --markdown summary.md
-    python tools/telemetry/compare_telemetry.py \
-        --baseline-dir tests/baselines --current-dir artifacts/telemetry
+    python tools/telemetry/compare_telemetry.py --baseline-dir DIR --current-dir DIR
 
 Exit status is 0 when every comparison is inside tolerance and 1 when anything breached, so
 this is usable directly as a CI gate.

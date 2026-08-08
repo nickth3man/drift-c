@@ -12,10 +12,19 @@ in the [README](README.md#prerequisites-windows--msys2-ucrt64) and run:
 scripts/setup_windows.ps1
 ```
 
-Optional but expected for `make verify`: `clang`, `clang-tools-extra` (clang-format),
-`cppcheck`, and `gcovr`, all from `pacman`. `make info` prints which of them it found.
+Expected by `make verify`: `clang`, `clang-tools-extra` (clang-format), and `cppcheck`.
+`gcovr` is only needed by `make coverage`, which `make ci` runs and `verify` does not. All
+four come from `pacman`, and `make info` prints which of them it found.
 
-Python tooling is one package:
+**Python is a prerequisite, not an optional extra.** `make regression` compares telemetry
+through `tools/telemetry/compare_telemetry.py`, and `make compile-commands` is a Python
+script too, so `verify` cannot complete without it. `setup_windows.ps1` does not install it:
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-pip
+```
+
+Then the Python tooling — ruff and pre-commit:
 
 ```bash
 pip install -r requirements-dev.txt
