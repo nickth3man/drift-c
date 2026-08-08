@@ -54,6 +54,7 @@ The project is pre-release and has no version tags yet, so entries are grouped u
   still pointed at `tools/*.py`, which had moved into six subdirectories. It also quoted a
   scenario count that was four short; the count is no longer quoted, on the same reasoning the
   check count already wasn't.
+<<<<<<< HEAD
 - `src/dev/failure_bundle.c` moved from `DEV_SRCS` to `SHARED_SRCS`. The dev executable links
   `PLATFORM_SRCS + SHARED_SRCS + HOTRELOAD_SRC` and reaches game code only through the
   hot-reload module, so the platform layer could not call into a file in `GAME_SRCS`.
@@ -63,6 +64,8 @@ The project is pre-release and has no version tags yet, so entries are grouped u
   roster loop. `ai-roster-laps` now also snapshots the shared `AiDriverConfig` and re-checks it
   after each car, so the per-car AI tuning the criterion forbids fails the scenario instead of
   passing unnoticed.
+=======
+>>>>>>> 924d8d1 (docs: root cleanup — move PLAN.md under docs/, rebuild README layout map)
 
 ### Removed
 

@@ -393,11 +393,8 @@ bundles capture it with no extra work.
 - `ai-no-privilege`: assert the AI writes nothing outside `Input` — verified by running with the AI and
   with a replay of its recorded input timeline and requiring **identical `stateChecksum`** at every tick.
   This is the strongest available proof that the AI has no side channel.
-- `ai-roster-laps`: every car is driven with the same `AiDriverConfig` bytes (snapshotted before
-  the roster loop and re-checked after each car), **and** each of the 6 cars completes the
-  out-lap + timed lap within the tick budget. Planned here as two scenarios
-  (`ai-uniform-config` and `ai-completes-lap`); they landed as one, because both assertions
-  need the same roster loop and splitting them would run all six cars twice to assert less.
+- `ai-uniform-config`: every car is driven with the same `AiDriverConfig` bytes.
+- `ai-completes-lap`: each of the 6 cars completes the out-lap + timed lap within the tick budget.
 - Determinism: two runs of the same car produce identical checksums.
 
 **Done when.** All five scenarios pass for all six cars, headless, with no per-car AI tuning.
@@ -410,11 +407,7 @@ bundles capture it with no extra work.
 events, summary metrics, and an explicit pass/fail with a reason.
 
 **Files.** `src/game/telemetry.h/.c`, `tests/support/simulation_fixture.c`, new
-`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`, new
-`docs/design/VALIDATION_SCHEMA.md`.
-
-> Planned as `docs/VALIDATION_SCHEMA.md`; it landed one directory down, in
-> `docs/design/VALIDATION_SCHEMA.md`, when the root cleanup gave every design document that home.
+`src/game/validation_metrics.h/.c`, new `src/game/run_report.h/.c`, new `docs/VALIDATION_SCHEMA.md`.
 
 **Retain.** The entire existing `TelemetryRow` schema and column order — the header comment already
 establishes "append, never rename" as the convention, and `tests/baselines/` depends on it.
@@ -422,15 +415,8 @@ establishes "append, never rename" as the convention, and `tests/baselines/` dep
 **Change — append to `TelemetryRow`:**
 `checkpointIndex`, `lapIndex`, `lapState` (0 out-lap / 1 timed / 2 complete / 3 aborted),
 `checkpointEvent` (0 none / 1 in-order / 2 out-of-order / 3 lap-complete), `collisionEvent`,
-`distanceToCenterlineM`, `onTrack`, and per-wheel slip columns, so four-wheel diagnosis is possible.
-
-**As built, all four wheels are appended for both slip angle and slip ratio**, not the two the
-axle columns appear to omit. This paragraph originally called for FR and RR only, on the reading
-that FL and RL were already written. That reading was wrong: `front_slip_angle_rad` is the
-bicycle-model *axle* angle from `physics_axle_slip_angles()` and `front_slip_ratio` is the *mean*
-of the two front wheels, so neither equals its left wheel. Appending only FR and RR would have put
-two genuinely different quantities in columns that look like a matched set. The axle columns keep
-their names and meaning, per append-never-rename.
+`distanceToCenterlineM`, `onTrack`, and the two missing per-wheel slip columns (FR and RR — only FL and
+RL are written today), so four-wheel diagnosis is possible.
 
 Everything else on the requested telemetry list is **already present**: time, tick, position, heading,
 `velocityLongitudinal/Lateral`, speed, yaw rate, steering angle, rpm, gear, per-axle slip angle and slip
@@ -470,7 +456,7 @@ sampling rate:
              "build_commit": "...", "build_dirty": false, "final_state_checksum": "..." },
   "lap":   { "out_lap_time_s": 33.10, "timed_lap_time_s": 31.482,
              "checkpoints_passed": 8, "checkpoints_missed": 0, "out_of_order_events": 0 },
-  "metrics": { "...": "see above, units in every key or in docs/design/VALIDATION_SCHEMA.md" },
+  "metrics": { "...": "see above, units in every key or in docs/VALIDATION_SCHEMA.md" },
   "artifacts": { "telemetry_csv": "telemetry.csv", "video_mp4": "run.mp4",
                  "replay": "replay.txt" } }
 ```
@@ -528,21 +514,12 @@ pixel-art render target chain.
 **Risks.**
 - *Framebuffer orientation.* raylib's `LoadImageFromScreen()` flip behaviour must be **verified**, not
   assumed; add `-vf vflip` only if the prototype shows it is needed.
-  → **Verified upright.** A frame extracted from `run.mp4` reads correctly. No `-vf vflip`; none added.
 - *Readback throughput.* 3600 frames × 1280×720×4 B ≈ 13 GB streamed per run (through a pipe, never to
   disk). `glReadPixels` at ~2–5 ms/frame ⇒ roughly 10–20 s per run, ~2 min for the suite. Measure in
   **prototype P3**; if too slow, read back the 640×360 pixel-art target and let ffmpeg upscale, cutting
   readback 4×.
-  → **Measured 17.2 s** for one 4093-frame car, 5.2 min for the 18-run suite. Within the estimate, so
-  full-resolution readback is kept and the 640×360 fallback is **not** taken.
 - *ffmpeg absence.* Detect at startup and fail the run with `video_encode_failed` rather than silently
   producing no artifact.
-  → **Verified**, but detection is at first frame write, not at startup: `_popen` on Windows succeeds
-  even when the command does not exist, so the failure surfaces when `fwrite` to the pipe fails and
-  `_pclose` returns nonzero. The run then ends with `video_encode_failed` and a nonzero exit. The
-  consequence is that this one failure mode aborts at frame 1, so its CSV holds a single row and no
-  MP4 exists — the only case where criterion 9's "failed runs still produce their MP4, CSV" cannot
-  hold, because the encoder *is* the failure.
 
 **Validation.** `mk validate CAR=rwd_grip` produces a playable MP4 whose duration equals
 `frame_count / 60` within one frame; `ffprobe` reports H.264 and the expected frame count; the overlay is
@@ -625,53 +602,12 @@ Small, throwaway, run in this order. Each answers one question that would otherw
    and its `failure_reason`.
 9. Failed runs still produce their MP4, CSV, `run.json` and a failure bundle — evidence is never
    discarded.
-10. The AI uses one `AiDriverConfig` for all six cars, asserted by `ai-roster-laps`. **A car that
+10. The AI uses one `AiDriverConfig` for all six cars, asserted by `ai-uniform-config`. **A car that
     cannot complete the lap is a FAIL with diagnostic evidence — never a reason to weaken the driver,
     widen the track, or special-case that car.**
 11. `mk regression` remains clean against `tests/baselines/`: the drivetrain refactor is bit-identical
     for RWD, and no drift-scoring removal touched a checksummed field.
 12. `grep -r "driftScore\|scoringDrift\|comboMultiplier" src/ tests/` returns nothing.
-
----
-
-## Milestone 1 status — complete
-
-All twelve acceptance criteria verified against a real suite run on 2026-08-08 (Windows 11,
-MSYS2 UCRT64, suite `20260808-031548-track-suite_v2-edd66b7`). The suite runs **18 cases** — six
-cars across three tracks (`chicane`, `sprint`, `technical`) — rather than the six this plan
-originally scoped; the extra tracks and start gates landed with the harness.
-
-| # | Criterion | Result |
-|---|---|---|
-| 1 | Enumerated by `--list-cars`, selectable by `--validate-lap --car` | 6/6; all 18 cases ran by id |
-| 2 | Driven only through `Input`, proven by `ai-no-privilege` | pass, 3 checks |
-| 3 | All gates in order; `checkpoints_missed == 0`, `out_of_order_events == 0` | 18/18, 16 crossings each |
-| 4 | Finite `timed_lap_time_s > 0` | 18/18, 24.900 s – 47.900 s |
-| 5 | Playable H.264 MP4 with the diagnostic overlay | 18/18 h264 1280×720 |
-| 6 | CSV row count == MP4 frame count; `run.json` carries every required key | 18/18 exact parity |
-| 7 | Re-runnable, with `compare_runs.py` giving a metric-level diff | pass; also proves determinism |
-| 8 | `mk validate` exits 0 all-pass, nonzero otherwise, failures named | 0 on 18/18; 1 with the break |
-| 9 | Failed runs keep MP4, CSV, `run.json` and a failure bundle | verified (see the ffmpeg caveat) |
-| 10 | One `AiDriverConfig` for all six cars | asserted per car by `ai-roster-laps` |
-| 11 | `mk regression` clean against `tests/baselines/` | 46 comparisons, no breaches |
-| 12 | No `driftScore` / `scoringDrift` / `comboMultiplier` | no matches |
-
-Criterion 8 was tested by crippling `fwd_light`'s tire μ: the suite exited 1, `suite.json` named
-all three of its cases with `checkpoint_missed`, and each kept its artifacts and bundle. The
-break was reverted.
-
-Two things this milestone deliberately did **not** do, both on criterion 10's rule that a car
-which cannot lap is a finding rather than a reason to tune: no AI parameter and no track
-geometry was changed to make any car pass. Every car laps on the shared config as it stands.
-
-Known cosmetic defect, not blocking: in the captured frame the validation overlay's
-steer/throttle/brake panel overlaps the game HUD's speed card, so the HUD's gear readout sits
-under the brake bar. The diagnostic overlay's own fields are all legible.
-
-The schema document Phase 5 called for is
-[design/VALIDATION_SCHEMA.md](design/VALIDATION_SCHEMA.md), which covers the `run.json` and
-`suite.json` contracts. It is prose beside a schema the build generates, so it has to be updated
-by hand whenever a field is added — worth knowing when appending one.
 
 ---
 
