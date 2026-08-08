@@ -637,8 +637,8 @@ static int run_validate_lap(Game *game, const Options *options)
                 vod.throttleInput = game->input.throttle;
                 vod.brakeInput = game->input.brake;
 
+                render_set_validation_overlay(&vod);
                 game_draw(game, 0.0f);
-                render_draw_validation_overlay(&vod);
 
                 Image shot = LoadImageFromScreen();
                 if (shot.data == NULL) {
@@ -675,8 +675,8 @@ static int run_validate_lap(Game *game, const Options *options)
             vod.throttleInput = game->input.throttle;
             vod.brakeInput = game->input.brake;
 
+            render_set_validation_overlay(&vod);
             game_draw(game, 0.0f);
-            render_draw_validation_overlay(&vod);
 
             Image shot = LoadImageFromScreen();
             if (shot.data != NULL) {

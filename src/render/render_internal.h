@@ -36,4 +36,8 @@ void render_hud_draw_diagnostics(const Game *game, float alpha);
 void render_hud_draw_arcade(const Game *game);
 void render_hud_draw_state_overlay(const Game *game);
 
+/* Draws the staged validation overlay, or nothing when none is staged. Called inside
+ * game_draw()'s frame so the offline capture readback sees it. */
+void render_draw_staged_validation_overlay(void);
+
 #endif /* DRIFTY_RENDER_INTERNAL_H */

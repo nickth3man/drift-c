@@ -26,8 +26,19 @@ typedef struct ValidationOverlayData {
     float brakeInput;    /* 0..1 */
 } ValidationOverlayData;
 
+/* Stage the overlay for the next frame; pass NULL to stop drawing it.
+ *
+ * It is staged rather than drawn on demand because game_draw() owns the BeginDrawing /
+ * EndDrawing pair, and EndDrawing() both flushes the batch and swaps buffers. A draw call
+ * made after game_draw() returns therefore lands in a batch that the next frame's
+ * ClearBackground wipes before it is ever presented, which is why the overlay was absent
+ * from every captured frame. Staging lets game_draw() draw it inside the frame, beside the
+ * HUD, where the capture readback can see it.
+ *
+ * The struct is copied, and the two strings are copied into module-owned buffers, so the
+ * caller's storage need not outlive the call. */
 #if !defined(DRIFTY_HOT_RELOAD) || defined(DRIFTY_GAME_MODULE)
-GAME_API void render_draw_validation_overlay(const ValidationOverlayData *data);
+GAME_API void render_set_validation_overlay(const ValidationOverlayData *data);
 #endif
 struct Game;
 
