@@ -50,6 +50,31 @@ typedef struct {
     float speedDeadbandMps; /* m/s; no pedal at all inside this band */
 
     float maxSpeedMps; /* m/s; hard ceiling on the speed target */
+
+    /* Pedal travel limits, in fraction of full travel per second. The car is driven with
+     * analogue triggers, and a trigger has a finite travel speed: without these the
+     * controller emits whatever its algebra produces on the current tick, which is a
+     * square wave when the term it reads is a noisy per-tick physics signal. Pressing is
+     * slower than releasing because releasing is spring-assisted. */
+    float pedalPressRatePerS;
+    float pedalReleaseRatePerS;
+
+    /* Fraction of travel the demand must move before the pedal follows it at all. A trigger
+     * held at a steady pressure does not dither; without this the rate limit still tracks
+     * every small wobble in the demand, at full rate. */
+    float pedalDeadband;
+
+    /* Traction management. Friction usage is a saturating instantaneous tyre state: it sits
+     * at or near 1.0 for most of a racing lap and recovers within a tick or two. Reading it
+     * proportionally makes throttle a high-gain function of a signal that is mostly noise,
+     * which is a square wave no filter can clean up without also blinding the driver to the
+     * genuine low-grip windows. So it is read as an event instead — over the threshold, ease
+     * off at a bounded rate; under it, feed the power back in at a bounded rate. The output
+     * is smooth because the rates bound it, not because the input was smoothed. */
+    float gripCutThreshold;    /* friction usage above which the driver eases off */
+    float gripCutRatePerS;     /* fraction of throttle surrendered per second while over */
+    float gripRecoverRatePerS; /* fraction fed back per second while under */
+    float gripCutMax;          /* most throttle the driver will ever give up */
 } AiDriverConfig;
 
 /* The driver's memory between ticks. Plain value data: it lives inside Game. */
@@ -60,6 +85,17 @@ typedef struct {
     float crossTrackErrorM;  /* diagnostic: signed, positive when left of the centreline */
     float targetSpeedMps;    /* diagnostic: what the speed controller was aiming for */
     float lookaheadAngleRad; /* diagnostic: bearing to the lookahead point, body frame */
+
+    /* Longitudinal demand as one signed axis: +1 is full throttle, -1 is full brake. Held
+     * across ticks because it is what the pedal rate limit acts on. Keeping it as a single
+     * axis is also what guarantees the driver never presses both pedals — throttle and
+     * brake are two halves of this one number, so they cannot both be nonzero. */
+    float pedalAxis;
+
+    /* Throttle currently surrendered to traction management, 0 (none) .. gripCutMax. Stored
+     * as the amount given up rather than the amount available so that a zeroed state means a
+     * driver willing to use all of the engine, which is what every caller memsets it to. */
+    float gripCut;
 } AiDriverState;
 
 /* Sensible starting values for every field. Never per car. */

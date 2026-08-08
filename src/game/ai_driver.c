@@ -51,6 +51,42 @@ void ai_driver_config_default(AiDriverConfig *cfg)
     cfg->speedGainP = 1.0f;
     cfg->speedDeadbandMps = 0.15f;
     cfg->maxSpeedMps = 80.0f;
+    /* 200 ms from rest to full travel, 100 ms back off it. A deliberate press on a trigger
+     * takes roughly the former; the spring returns it in roughly the latter. */
+    cfg->pedalPressRatePerS = 5.0f;
+    cfg->pedalReleaseRatePerS = 10.0f;
+    cfg->pedalDeadband = 0.02f;
+    /* Ease off over ~0.6 s of sustained limit, feed it back over ~0.75 s. Cutting is quicker
+     * than recovering because losing grip must be answered sooner than it is forgiven, but
+     * recovery still has to finish inside the length of a short straight or the driver never
+     * reaches full throttle at all. */
+    cfg->gripCutThreshold = 0.97f;
+    cfg->gripCutRatePerS = 1.4f;
+    cfg->gripRecoverRatePerS = 1.15f;
+    cfg->gripCutMax = 0.85f;
+}
+
+/* Move a pedal axis toward its demand no faster than the trigger can physically travel.
+ * Moving away from zero is a press, moving toward zero is a release. */
+static float slew_pedal_axis(float current, float target, float pressRatePerS,
+                             float releaseRatePerS, float deadband, float dt)
+{
+    /* Hold rather than chase: a trigger held at a steady pressure does not dither, and
+     * without this the limiter tracks every small wobble in the demand at full rate.
+     *
+     * The stops are exempt. A trigger can be pushed fully against its travel limit and
+     * released fully to rest, so a demand of exactly 0 or of full travel is always followed;
+     * applying the deadband there would leave the pedal permanently short of the rail and the
+     * driver would never actually reach full throttle. */
+    const bool targetAtStop = (target == 0.0f) || (fabsf(target) >= 1.0f);
+    if (!targetAtStop && fabsf(target - current) <= deadband) return current;
+
+    const float rate = (fabsf(target) >= fabsf(current)) ? pressRatePerS : releaseRatePerS;
+    const float maxStep = maxf(rate, 0.0f) * dt;
+    const float delta = target - current;
+    if (delta > maxStep) return current + maxStep;
+    if (delta < -maxStep) return current - maxStep;
+    return target;
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -271,22 +307,39 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
     }
     targetSpeedMps = clampf(targetSpeedMps, 0.0f, cfg->maxSpeedMps);
 
+    /* Traction management: ease off while the tyres are at the limit, feed the power back in
+     * once they hook up again. Both directions are rate-bounded, so the throttle this produces
+     * is smooth however jagged the underlying friction reading is. */
+    if (derived->maxFrictionUsage >= cfg->gripCutThreshold) {
+        state->gripCut += cfg->gripCutRatePerS * dt;
+    } else {
+        state->gripCut -= cfg->gripRecoverRatePerS * dt;
+    }
+    state->gripCut = clampf(state->gripCut, 0.0f, cfg->gripCutMax);
+
+    /* One signed longitudinal demand: +1 full throttle, -1 full brake. Expressing it as a
+     * single axis is what makes "never both pedals" structural rather than a rule to obey. */
     const float speedErrorMps = targetSpeedMps - speedMps;
+    float pedalDemand;
     if (speedErrorMps >= -cfg->speedDeadbandMps) {
-        /* Full throttle is the default on the authored racing line. The curvature scan has
-         * already reduced targetSpeedMps before a corner. If the previous physics tick reports
-         * the friction ellipse filling up, spend the remaining longitudinal grip on the line
-         * instead of turning a high-power car into an unrecoverable spin. */
-        const float gripHeadroom =
-            clampf((1.0f - derived->maxFrictionUsage) / 0.20f, 0.0f, 1.0f);
-        out->throttle = (derived->maxFrictionUsage > 0.80f) ? gripHeadroom : 1.0f;
-        out->brake = 0.0f;
+        /* Full throttle is the default on the authored racing line: the curvature scan has
+         * already reduced targetSpeedMps before a corner, so being under the speed target
+         * means the power is wanted. Traction management is the only thing that takes any of
+         * it away, and only for as long as the tyres are actually saturated. */
+        pedalDemand = clampf(1.0f - state->gripCut, 0.0f, 1.0f);
     } else {
         /* Once late braking is required, use the shortest available deceleration rather than
          * coasting into the corner. The target was back-propagated from its tightest point. */
-        out->throttle = 0.0f;
-        out->brake = clampf(-cfg->speedGainP * speedErrorMps, 0.0f, 1.0f);
+        pedalDemand = -clampf(-cfg->speedGainP * speedErrorMps, 0.0f, 1.0f);
     }
+
+    /* Rate-limit the axis, then split it. The driver must therefore lift off before it can
+     * brake, exactly as a player moving between two triggers must. */
+    state->pedalAxis = slew_pedal_axis(state->pedalAxis, clampf(pedalDemand, -1.0f, 1.0f),
+                                       cfg->pedalPressRatePerS, cfg->pedalReleaseRatePerS,
+                                       cfg->pedalDeadband, dt);
+    out->throttle = maxf(state->pedalAxis, 0.0f);
+    out->brake = maxf(-state->pedalAxis, 0.0f);
 
     /* This driver has no handbrake. Stated as an assignment rather than an omission so that a
      * caller reusing an Input from a previous tick cannot inherit one. */
