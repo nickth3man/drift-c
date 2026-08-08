@@ -8,7 +8,7 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
 - Setup, checks, and the hot-reload rules: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Design contracts and historical notes: [docs/](docs/README.md)
+- Design contracts and the current milestone plan: [docs/](docs/README.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 - Notable changes: [CHANGELOG.md](CHANGELOG.md)
 
@@ -58,8 +58,10 @@ previous step's solved body-longitudinal acceleration, transfers axle load from 
 CG geometry, propagates the dynamic loads into tire capacity, and applies separated
 quadratic aerodynamic drag and per-wheel rolling resistance.
 
-The headless runner covers 110 scenarios. (The check count is not quoted here — it moves with
-every parameter added, and `./build/tests/drifty_tests.exe` prints the current total.) Eight reviewed
+Neither the scenario count nor the check count is quoted here — both move with every scenario
+and parameter added, and a number written down once is wrong shortly afterwards.
+`./build/tests/drifty_tests.exe --list` names every scenario; running it without arguments
+prints the current totals. Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
 steer, lift-off, transition, and a catchable drift. They live in `tests/baselines/`;
 `mk regression` compares a fresh run against them, and `mk baselines` re-records them only
@@ -281,57 +283,98 @@ sliders, the profile format, the telemetry metadata, and the `--dump-params` tab
 
 ## Layout
 
+Grouped by directory, so this block can be checked against `ls` rather than read as prose.
+
 ```
-Makefile, build.sh, build.bat   build entry points; all terminate immediately
-mk.bat                          run a Makefile target inside MSYS2 UCRT64 from cmd.exe
-tools/setup/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
-tools/setup/validate_hotreload.sh   harness + failed-compile preservation
-src/platform/main.c                      platform layer: window, Game allocation, fixed-timestep loop
-src/platform/timestep.h/.c               the accumulator, isolated so the harness can assert it
-src/platform/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
-src/platform/hotreload_windows.c         LoadLibrary / GetProcAddress loader
-src/game/game.h/.c                   the Game block and the reloadable entry points
-src/core/config.h                    default constants, every physical value unit-bearing
-src/core/units.h                     world<->render conversion and the coordinate convention
-src/core/math_utils.h/.c             scalar helpers raymath.h does not provide
-src/game/input.h/.c                  held controls and one-shot commands
-src/game/replay.h/.c                 deterministic fixed-tick input timeline
-src/game/telemetry.h/.c              CSV row writer, no raylib dependency
-src/physics/vehicle.h/.c                canonical vehicle data and initialization
-src/physics/tire.h/.c                   pure nonlinear curves, slip ratio, combined-friction limit
-src/physics/drivetrain.h/.c             pure engine/gearing/torque/wheel dynamics
-src/physics/auto_transmission.h/.c      automatic shift logic over the drivetrain
-src/physics/physics.h/.c                pure Phase 3 integration and fixed-update owner
-src/world/collision.h/.c              swept body collision against track geometry
-src/physics/surface.h/.c                surface types by SurfaceId, resolved at point of use
-src/world/track.h/.c                  track layout and surface regions
-src/game/particle.h/.c               skidmarks and tire smoke
-src/game/audio.h/.c                  engine, screech, and impact playback
-src/render/car_visual.h/.c             the appearance grammar: VehicleSpec -> CarVisual, raylib-free
-src/render/car_visual_raster.h/.c      CPU rasterizer, feature-label maps, nose-up rotation
-src/dev/car_corpus.h/.c             the 100 demonstration vehicles as pure functions of an index
-src/render/render.h/.c                 interpolation, sprite bake/compose, HUD, vectors, tire plots
-src/dev/dev_params.h/.c             the one tunable registry: sliders, profiles, docs, metadata
-src/dev/dev_presets.h/.c            hand-designed vehicle presets
-src/dev/dev_scenario.h/.c           scripted maneuvers, shared by the lab and the headless runner
-src/dev/dev_state.h/.c              lab state inside Game: scope, trajectory, invariant monitor
-src/dev/dev_lab.h/.c                the raygui Physics Lab (development builds only)
-src/dev/dev_replay.h/.c             durable replay timelines and the inspector's event markers
-src/dev/failure_bundle.h/.c         reproducible failure directories
-src/game/profile.h/.c                zone instrumentation: off, built-in timers, or Tracy
-src/platform/build_info.h                commit, branch, dirty flag, compiler, flags, platform
-tests/test_main.c             headless scenario runner (scenarios under tests/scenarios/)
-tests/hotreload/              windowless hot-reload validation
-tests/baselines/                reviewed deterministic scenario CSV baselines
-tests/visual/                   deterministic scene baselines and the RMSE gate
-tools/*.py                      telemetry comparison, plots, summaries, HTML reports
-tools/visual/                   browser appearance inspector and its Playwright measurements
-data/vehicles/corpus/                  the corpus exported as tuning profiles; checked in, and the
-                                `corpus` scenario asserts it round-trips
-fuzz/fuzz_*.c                   libFuzzer targets for the parsers and the tire functions
-third_party/raygui/             vendored raygui, development builds only
-artifacts/                      telemetry CSV, reports, screenshots, replays,
-                                failure bundles, cards, gallery (all gitignored)
+Makefile, build.sh, build.bat             build entry points; all terminate immediately
+mk.bat                                    run a Makefile target inside MSYS2 UCRT64 from cmd.exe
+
+src/core/config.h                         default constants, every physical value unit-bearing
+src/core/units.h                          world<->render conversion and the coordinate convention
+src/core/math_utils.h/.c                  scalar helpers raymath.h does not provide
+
+src/platform/main.c                       platform layer: window, Game allocation, fixed-timestep loop
+src/platform/timestep.h/.c                the accumulator, isolated so the harness can assert it
+src/platform/hotreload.h                  GAME_ENTRY_POINTS, the one authoritative entry-point list
+src/platform/hotreload_windows.c          LoadLibrary / GetProcAddress loader
+src/platform/build_info.h                 commit, branch, dirty flag, compiler, flags, platform
+
+src/game/game.h/.c                        the Game block and the reloadable entry points
+src/game/input.h/.c                       held controls and one-shot commands
+src/game/ai_driver.h/.c                   baseline lap driver; writes only the Input a player writes
+src/game/car_roster.h/.c                  the six validated cars, two per drivetrain layout
+src/game/replay.h/.c                      deterministic fixed-tick input timeline
+src/game/telemetry.h/.c                   CSV row writer, no raylib dependency
+src/game/validation_metrics.h/.c          pure reduction of a lap run to summary metrics
+src/game/run_report.h/.c                  writes the run.json one validation lap is judged against
+src/game/particle.h/.c                    skidmarks and tire smoke
+src/game/audio.h/.c                       engine, screech, and impact playback
+src/game/profile.h/.c                     zone instrumentation: off, built-in timers, or Tracy
+
+src/physics/vehicle.h/.c                  canonical vehicle data and initialization
+src/physics/tire.h/.c                     pure nonlinear curves, slip ratio, combined-friction limit
+src/physics/drivetrain.h/.c               pure engine/gearing/torque/wheel dynamics
+src/physics/auto_transmission.h/.c        automatic shift logic over the drivetrain
+src/physics/physics.h/.c                  pure Phase 3 integration and fixed-update owner
+src/physics/surface.h/.c                  surface types by SurfaceId, resolved at point of use
+
+src/world/track.h/.c                      track layout, surface regions, learned racing line
+src/world/collision.h/.c                  swept body collision against track geometry
+
+src/render/car_visual.h/.c                the appearance grammar: VehicleSpec -> CarVisual, raylib-free
+src/render/car_visual_raster.h/.c         CPU rasterizer, feature-label maps, nose-up rotation
+src/render/car_appearance.h               presentation-only paint identity, kept out of VehicleSpec
+src/render/vehicle_effects.h/.c           transient braking/saturation/load feedback, render-only
+src/render/render.h/.c                    interpolation, pixel-art target, GPU lifecycle, frame orchestration
+src/render/render_internal.h              the implementation-only seams between the renderer's units
+src/render/render_world.c                 the track, the tire smoke, and the debug vector overlay
+src/render/render_vehicle.c               baked sprite upload, the cached car, the corpus gallery
+src/render/render_hud.c                   diagnostics readout, arcade HUD, full-screen state overlays
+src/render/render_validation_overlay.c    identity/progress overlay burned into captured video
+
+src/dev/dev_params.h/.c                   the one tunable registry: sliders, profiles, docs, metadata
+src/dev/dev_presets.h/.c                  hand-designed vehicle presets
+src/dev/dev_scenario.h/.c                 scripted maneuvers, shared by the lab and the headless runner
+src/dev/dev_state.h/.c                    lab state inside Game: scope, trajectory, invariant monitor
+src/dev/dev_lab.h/.c                      the raygui Physics Lab (development builds only)
+src/dev/dev_replay.h/.c                   durable replay timelines and the inspector's event markers
+src/dev/failure_bundle.h/.c               reproducible failure directories
+src/dev/car_corpus.h/.c                   the 100 demonstration vehicles as pure functions of an index
+src/dev/car_corpus_archetypes.c           the 17 hand-designed archetype forms and their table
+src/dev/car_corpus_internal.h             the seam between that table and the corpus machinery
+
+tests/test_main.c                         headless scenario runner
+tests/test_scenarios.h                    the registry contract between runner and scenario groups
+tests/test_commands.h/.c                  the non-scenario modes: generators, benchmarks, verifiers
+tests/scenarios/                          the five scenario groups the runner registers
+tests/support/                            check framework, Game->row projection, appearance metrics
+tests/hotreload/                          windowless hot-reload validation
+tests/baselines/                          reviewed deterministic scenario CSV baselines
+tests/visual/                             deterministic scene baselines and the RMSE gate
+
+tools/setup/                              MSYS2 UCRT64 bootstrap, hot-reload validation
+tools/build/                              compile_commands.json generation
+tools/telemetry/                          telemetry comparison, plots, summaries, HTML reports
+tools/validation/                         suite runner, run diffing, racing-line optimiser
+tools/appearance/                         RGBA regression and sprite rotation measurement
+tools/recording/                          gameplay capture
+tools/visual/                             browser appearance inspector and its Playwright measurements
+
+data/input/                               the SDL game controller database
+data/vehicles/                            reviewed vehicle profiles; the Physics Lab also saves here
+data/vehicles/corpus/                     the corpus exported as tuning profiles; checked in, and the
+                                          `corpus` scenario asserts it round-trips
+
+docs/README.md                            the index for everything below it
+docs/design/                              current contracts, present tense
+docs/PLAN.md                              the active milestone plan, future tense
+
+fuzz/fuzz_*.c                             libFuzzer targets for the parsers and the tire functions
+third_party/raygui/                       vendored raygui, development builds only
+third_party/stb/                          vendored stb_image_write, headless PNG output
+resources/audio/                          runtime audio assets
+artifacts/                                telemetry CSV, reports, screenshots, replays,
+                                          failure bundles, cards, gallery (all gitignored)
 ```
 
 ## Licence

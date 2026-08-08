@@ -1,11 +1,13 @@
 # Drifty documentation
 
-Two directories, split by whether a document tells you how the code behaves **now**.
+Two kinds of document, split by tense.
 
-- **[design/](design/)** — current contracts. If one of these disagrees with the code, that is
-  a bug in one of them, and worth resolving rather than ignoring.
-Historical evaluations and investigations are not part of the current contract; delete or date
-them before adding them under `notes/`.
+- **[design/](design/)** — current contracts, written in the present tense. If one of these
+  disagrees with the code, that is a bug in one of them, and worth resolving rather than
+  ignoring.
+- **[PLAN.md](PLAN.md)** — the active milestone plan, written in the future tense. It describes
+  work intended, not behaviour shipped, so it is the one document here you should *expect* to
+  disagree with the code.
 
 Start elsewhere for the basics: [README](../README.md) for what Drifty is and how to build it,
 [CONTRIBUTING](../CONTRIBUTING.md) for setup and what must be green before pushing, and
@@ -23,12 +25,18 @@ Start elsewhere for the basics: [README](../README.md) for what Drifty is and ho
 | [RACING_LINE_OPTIMIZATION](design/RACING_LINE_OPTIMIZATION.md) | The learned racing line: how the per-node lateral offsets are found and consumed |
 | [VALIDATION_SCHEMA](design/VALIDATION_SCHEMA.md) | The `run.json` / `suite.json` contract the validation pipeline emits |
 
-There are no retained historical notes at present.
+## PLAN.md
+
+Milestone 1 — automated chicane lap validation. Records the decisions taken at the interview,
+the disposition of every existing system (keep / reuse / replace), and the phased work to get
+from the current build to a repeatable per-car pipeline that emits an MP4, a telemetry CSV, and
+a run JSON with an explicit pass/fail.
 
 ## Adding a document
 
-Put it in `design/` if it describes how the code behaves and you intend to keep it true, and
-in `notes/` otherwise. Date anything in `notes/` and say in a header what is stale about it —
-an undated note is indistinguishable from a current spec after a few months, which is the
-problem this split exists to solve. Then add a row above; a document nobody can find from
-here is one nobody reads.
+Put it in `design/` if it describes how the code behaves and you intend to keep it true, then
+add a row to the table above — a document nobody can find from here is one nobody reads.
+
+Date anything historical and say in a header what is stale about it. An undated note is
+indistinguishable from a current spec after a few months, which is the problem the tense split
+above exists to solve.

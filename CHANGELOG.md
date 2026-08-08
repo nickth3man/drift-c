@@ -32,6 +32,19 @@ The project is pre-release and has no version tags yet, so entries are grouped u
 - `src/platform/hotreload.h` and `src/render/car_visual.h` reformatted. Their formatting was
   only valid on a CRLF worktree, because clang-format counts the `\r` toward `ColumnLimit`.
 - `CLAUDE.md` is now a pointer to `AGENTS.md` instead of a byte-identical copy of it.
+- The Milestone 1 plan moved from `PLAN.md` at the root into `docs/PLAN.md`, and is indexed by
+  `docs/README.md`. At the root it was linked from nothing, so the one document describing where
+  the project is going was reachable only by noticing it in a directory listing.
+- `docs/README.md` no longer describes a `design/` + `notes/` split. `notes/` never existed, so
+  the index referred to a missing directory three times and told contributors to file documents
+  into it. The split it was reaching for — current contracts versus historical notes — is now
+  stated as a tense distinction between `design/` and `PLAN.md`.
+- The `## Layout` map in `README.md` was rebuilt from the tree and grouped by directory. It had
+  drifted badly: 18 source files were missing (including `ai_driver`, `car_roster`,
+  `run_report`, `validation_metrics`, `vehicle_effects`, and the whole `render.c` split), and it
+  still pointed at `tools/*.py`, which had moved into six subdirectories. It also quoted a
+  scenario count that was four short; the count is no longer quoted, on the same reasoning the
+  check count already wasn't.
 
 ### Removed
 
