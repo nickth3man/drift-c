@@ -109,3 +109,4 @@ PowerShellEditorServices.json
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps
+debug/

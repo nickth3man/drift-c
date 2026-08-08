@@ -1,0 +1,94 @@
+# Drifty clang-tidy.
+#
+# This is plain C11, so the C++-oriented check groups (modernize-*, cppcoreguidelines-*,
+# hicpp-*) are off entirely rather than disabled one at a time: none of them can fire on code
+# with no classes, no templates, and no RAII.
+#
+# Run it with `make tidy`. It reads compile_commands.json, so run `make compile-commands`
+# first if the source manifest has changed. It is NOT a gate on the whole tree yet — the
+# existing findings have to be worked through before it can be — so CI checks changed files
+# only and the nightly job reports the full-tree count.
+#
+# Disabled checks are listed with a reason. A check turned off without one gets turned back
+# on by the next person who reads this file and cannot tell why it went.
+
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  -readability-avoid-const-params-in-decls,
+  -misc-no-recursion,
+  -cert-err33-c,
+  -readability-uppercase-literal-suffix,
+  -misc-include-cleaner,
+  -readability-math-missing-parentheses,
+  -readability-implicit-bool-conversion,
+  -readability-isolate-declaration,
+  -readability-use-concise-preprocessor-directives,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-optin.performance.Padding,
+
+# bugprone-easily-swappable-parameters
+#     Physics signatures are full of (float, float) pairs — forces on an axle, a load split,
+#     a slip pair. The warning is right that they are swappable and has no advice worth taking.
+# readability-magic-numbers
+#     A simulation is numbers. src/core/config.h already names the ones that carry meaning.
+# readability-function-cognitive-complexity
+#     The fixed-update step is genuinely long and splitting it to satisfy a threshold would
+#     scatter one physical process across several functions.
+# readability-identifier-length
+#     dt, ax, fx, mu are the notation this domain is written in.
+# readability-braces-around-statements
+#     .clang-format deliberately keeps `if (game == NULL) return;` on one line.
+# readability-avoid-const-params-in-decls
+#     Fires on the const-correct style the headers already use consistently.
+# misc-no-recursion
+#     The track and corpus walkers recurse on purpose over bounded structures.
+# cert-err33-c
+#     Would flag every unchecked printf in the test runner and telemetry writers, where the
+#     return value genuinely does not matter. The real unchecked-return risks (fopen, malloc)
+#     are covered by clang-analyzer-* instead.
+#
+# The six below were measured, not guessed: with everything on, the tree reports 6,759
+# findings and these are 6,723 of them. All six are style preferences that disagree with a
+# convention the codebase already applies consistently, so each one is thousands of edits
+# buying nothing. Off, the baseline is ~36 — small enough to actually work through.
+#
+# readability-uppercase-literal-suffix   5138 — wants 1.0F; the codebase writes 1.0f throughout
+# misc-include-cleaner                    721 — every symbol explicitly included, which fights
+#                                               raylib.h being an umbrella header
+# readability-math-missing-parentheses    459 — wants a + (b * c). The physics is written to
+#                                               read like the equations it implements
+# readability-implicit-bool-conversion    275 — `if (ptr)` vs `if (ptr != NULL)`; a preference
+# readability-isolate-declaration         105 — one declarator per line; a preference
+# readability-use-concise-preprocessor-directives  25 — #ifdef over #if defined()
+#
+# Two more, measured the same way — 358 of the 449 that remained:
+#
+# clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling  342
+#     Flags every memset/fprintf/snprintf and recommends the C11 Annex K `_s` variants.
+#     Annex K is optional, glibc does not implement it, and MinGW only partly does, so the
+#     advice cannot be taken on either platform this builds for. The real buffer risks are
+#     covered by clang-analyzer-security.ArrayBound, which stays on.
+# clang-analyzer-optin.performance.Padding                               16
+#     Suggests reordering struct fields to save padding. `Game` and everything reachable from
+#     it is a hot-reload layout contract — reordering fields is exactly the change that
+#     requires restarting the executable, and saving a few bytes is not worth spending that.
+
+# Our code only. third_party/ is vendored verbatim and must never be reformatted or "fixed".
+HeaderFilterRegex: '^(src|tests)/.*\.h$'
+
+FormatStyle: file
+
+# Findings are reported, never auto-applied: a tidy fix in physics code needs a human to
+# decide whether the behaviour it changes was load-bearing.
+WarningsAsErrors: ''
