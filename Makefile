@@ -423,7 +423,7 @@ record: windows-only
 
 format-py:
 ifeq ($(RUFF),)
-	@echo "ruff not installed. pip install -r requirements-dev.txt" >&2
+	@echo "ruff not installed. uv tool install ruff==0.15.20" >&2
 	@exit 1
 else
 	$(RUFF) check --fix .
@@ -432,7 +432,7 @@ endif
 
 lint-py:
 ifeq ($(RUFF),)
-	$(call skip,lint-py: ruff not installed (pip install -r requirements-dev.txt).)
+	$(call skip,lint-py: ruff not installed (uv tool install ruff==0.15.20).)
 else
 	$(RUFF) check .
 	$(RUFF) format --check .

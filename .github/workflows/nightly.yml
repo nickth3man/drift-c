@@ -20,12 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang clang-format clang-tidy cppcheck gcovr
-          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          uv pip install --system -r requirements-dev.txt
 
       - name: Fetch raylib headers
         run: |

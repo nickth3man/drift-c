@@ -1,6 +1,11 @@
-# Third-party packages the dev scripts need. Install with:
+# Third-party packages the dev scripts need. Install with [uv](https://docs.astral.sh/uv/):
 #
-#   pip install -r requirements-dev.txt
+#   uv pip install -r requirements-dev.txt
+#
+# On MSYS2 UCRT64 the mingw python cannot take PyPI's MSVC-only ruff wheel, so install the
+# tools as isolated uv tools there instead:
+#
+#   uv tool install ruff==0.15.20 pre-commit
 #
 # Keep this list short. Most tooling here is pure-stdlib on purpose: compare_car_rgba.py
 # implements PNG decoding itself rather than depend on Pillow, which means the appearance

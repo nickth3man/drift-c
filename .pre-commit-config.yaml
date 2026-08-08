@@ -1,6 +1,6 @@
 # Catches formatting at commit time instead of in review or in CI.
 #
-#   pip install pre-commit && pre-commit install     once, per clone
+#   uv tool install pre-commit && pre-commit install     once, per clone
 #   pre-commit run --all-files                       check everything now
 #   git commit --no-verify                           bypass, when you mean to
 #

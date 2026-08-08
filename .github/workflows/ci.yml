@@ -56,8 +56,18 @@ jobs:
             gcovr:p
             python:p
 
+      # uv owns the Python tooling. PyPI's ruff ships MSVC wheels only, so it cannot install
+      # into MSYS2's mingw python; uv runs the pinned ruff in its own managed python instead.
+      # python-version pins a uv-managed CPython (MSVC-compatible) so the ruff wheel resolves,
+      # and setup-uv places the tool binary on PATH where `command -v ruff` finds it.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.13"
+
       - name: Install pinned Python tooling
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+        # ruff==0.15.20 must match requirements-dev.txt and .pre-commit-config.yaml.
+        run: uv tool install ruff==0.15.20
 
       - name: Resolved toolchain
         run: make info
@@ -73,12 +83,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang clang-format cppcheck gcovr
-          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          uv pip install --system -r requirements-dev.txt
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
